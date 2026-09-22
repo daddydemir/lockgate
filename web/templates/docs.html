@@ -1,0 +1,321 @@
+{{define "docs"}}{{template "top" .}}
+<p class="subtitle">Connect an application, request its secrets, and wait for administrator approval.</p>
+
+<div class="docs-layout">
+  <aside class="docs-index panel" aria-label="Documentation sections">
+    <p class="eyebrow">ON THIS PAGE</p>
+    <a href="#quick-start">Quick start</a>
+    <a href="#environment">Configuration</a>
+    <a href="#curl">API with curl</a>
+    <a href="#languages">Language examples</a>
+    <a href="#responses">Responses</a>
+    <a href="#security">Security notes</a>
+  </aside>
+
+  <div class="docs-content">
+    <section id="quick-start" class="panel docs-section">
+      <span class="badge green">START HERE</span>
+      <h2>Application startup flow</h2>
+      <p>LockGate uses the same flow in local development, Docker, CI, and production.</p>
+      <div class="language-note"><strong>Use it from any programming language.</strong><p>Applications communicate with LockGate over JSON and HTTP. No LockGate SDK or Go package is required. The server itself is written in Go, but your application can use JavaScript, Python, PHP, Java, Rust, or any HTTP client.</p></div>
+      <ol class="steps">
+        <li><span>1</span><div><strong>Create a secret</strong><p>Open <a href="/admin/secrets">Secrets</a> and add a path such as <code>projects/crypto/prod/database</code>.</p></div></li>
+        <li><span>2</span><div><strong>Create an application</strong><p>Open <a href="/admin/applications">Applications</a>, set its environment and allowed paths, then save the token shown once.</p></div></li>
+        <li><span>3</span><div><strong>Request secrets at startup</strong><p>The application sends only its token. LockGate resolves its application, environment, and assigned secrets on the server.</p></div></li>
+        <li><span>4</span><div><strong>Approve access</strong><p>The request appears under <a href="/admin/approvals">Approvals</a>. Once approved, restarts keep working until the grant is revoked.</p></div></li>
+      </ol>
+    </section>
+
+    <section id="environment" class="panel docs-section">
+      <h2>Application configuration</h2>
+      <p>Pass the URL and one-time application token through the runtime environment.</p>
+      <div class="code-heading"><span>Environment variables</span><button type="button" class="small" data-copy-code="env-example">Copy</button></div>
+      <pre id="env-example"><code data-language="env">LOCKGATE_URL={{.PublicURL}}
+LOCKGATE_TOKEN=lg_app_your_token_here</code></pre>
+      <div class="notice"><strong>Keep the token private.</strong> Do not commit it to Git, bake it into a Docker image, or print it in application logs.</div>
+      <h3>Docker Compose example</h3>
+      <div class="code-heading"><span>compose.yaml</span><button type="button" class="small" data-copy-code="compose-example">Copy</button></div>
+      <pre id="compose-example"><code data-language="yaml">services:
+  backend:
+    image: your-backend:latest
+    environment:
+      LOCKGATE_URL: {{.PublicURL}}
+      LOCKGATE_TOKEN: ${LOCKGATE_TOKEN}</code></pre>
+    </section>
+
+    <section id="curl" class="panel docs-section">
+      <h2>Raw HTTP API with curl</h2>
+      <p>Start an access request with an application token. The idempotency key identifies one running instance; use a different value for every replica.</p>
+      <div class="code-heading"><span>Request access</span><button type="button" class="small" data-copy-code="curl-request">Copy</button></div>
+      <pre id="curl-request"><code data-language="bash">curl --request POST '{{.PublicURL}}/api/v1/access' \
+  --header "Authorization: Bearer $LOCKGATE_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --header "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)" \
+  --data '{}'</code></pre>
+      <p>Without an active grant, LockGate returns HTTP <code>202</code>:</p>
+      <pre><code data-language="json">{"status":"waiting_approval","request_id":"...","retry_after":3}</code></pre>
+      <p>Poll the returned request ID at the advised interval:</p>
+      <div class="code-heading"><span>Poll request</span><button type="button" class="small" data-copy-code="curl-poll">Copy</button></div>
+      <pre id="curl-poll"><code data-language="bash">curl '{{.PublicURL}}/api/v1/access/REQUEST_ID' \
+  --header "Authorization: Bearer $LOCKGATE_TOKEN"</code></pre>
+    </section>
+
+    <section id="languages" class="panel docs-section">
+      <h2>Language examples</h2>
+      <p>Each example uses the same token-only HTTP flow. Choose your language.</p>
+
+      <div class="code-tabs" data-code-tabs>
+        <div class="code-tab-list" role="tablist" aria-label="Language examples">
+          <button type="button" role="tab" id="tab-javascript" aria-controls="panel-javascript" aria-selected="true">JavaScript</button>
+          <button type="button" role="tab" id="tab-python" aria-controls="panel-python" aria-selected="false" tabindex="-1">Python</button>
+          <button type="button" role="tab" id="tab-go" aria-controls="panel-go" aria-selected="false" tabindex="-1">Go</button>
+        </div>
+
+        <div role="tabpanel" id="panel-javascript" aria-labelledby="tab-javascript">
+          <div class="code-heading"><span>startup.mjs · Node.js 18+</span><button type="button" class="small" data-copy-code="javascript-example">Copy</button></div>
+          <pre id="javascript-example"><code data-language="javascript">const url = process.env.LOCKGATE_URL;
+const token = process.env.LOCKGATE_TOKEN;
+const headers = {
+  Authorization: `Bearer ${token}`,
+  "Content-Type": "application/json",
+  "Idempotency-Key": crypto.randomUUID(),
+};
+
+let response = await fetch(`${url}/api/v1/access`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({}),
+});
+let access = await response.json();
+
+while (access.status === "waiting_approval") {
+  await new Promise(resolve =&gt; setTimeout(resolve, access.retry_after * 1000));
+  response = await fetch(`${url}/api/v1/access/${access.request_id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  access = await response.json();
+}
+
+if (access.status !== "approved") throw new Error(`Access ${access.status}`);
+const bundles = Object.values(access.secrets);
+if (bundles.length !== 1) throw new Error("Expected one configured bundle");
+const values = bundles[0];</code></pre>
+        </div>
+
+        <div role="tabpanel" id="panel-python" aria-labelledby="tab-python" hidden>
+          <div class="code-heading"><span>startup.py · Python 3</span><button type="button" class="small" data-copy-code="python-example">Copy</button></div>
+          <pre id="python-example"><code data-language="python">import json
+import os
+import time
+import urllib.request
+import uuid
+
+url = os.environ["LOCKGATE_URL"]
+token = os.environ["LOCKGATE_TOKEN"]
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json",
+    "Idempotency-Key": str(uuid.uuid4()),
+}
+request = urllib.request.Request(
+    f"{url}/api/v1/access", json.dumps({}).encode(), headers
+)
+with urllib.request.urlopen(request, timeout=15) as response:
+    access = json.load(response)
+
+while access["status"] == "waiting_approval":
+    time.sleep(max(access.get("retry_after", 3), 3))
+    request = urllib.request.Request(
+        f"{url}/api/v1/access/{access['request_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        access = json.load(response)
+
+if access["status"] != "approved":
+    raise RuntimeError(f"LockGate access {access['status']}")
+bundles = list(access["secrets"].values())
+if len(bundles) != 1:
+    raise RuntimeError("Expected one configured bundle")
+values = bundles[0]</code></pre>
+        </div>
+
+        <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" hidden>
+          <div class="notice"><strong>There is no published LockGate Go package.</strong> No external SDK is required: copy the small client below into your project, or import <code>pkg/client</code> when working inside this source module.</div>
+          <div class="code-heading"><span>main.go · application usage</span><button type="button" class="small" data-copy-code="go-example">Copy</button></div>
+          <pre id="go-example"><code data-language="go">package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "time"
+
+    lockgate "your-project/internal/lockgateclient"
+)
+
+func main() {
+    client := lockgate.New(os.Getenv("LOCKGATE_URL"), os.Getenv("LOCKGATE_TOKEN"))
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+    defer cancel()
+
+    values, err := client.GetConfig(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    dbPassword := values["DB_PASSWORD"]
+    _ = dbPassword // Pass it to your database config; never log it.
+}</code></pre>
+
+          <h3>Go client implementation</h3>
+          <p>This is the complete client used by the example. It sends only the token, waits at the server-advised interval, and fails closed on denial or malformed responses.</p>
+          <div class="code-heading"><span>internal/lockgateclient/client.go</span><button type="button" class="small" data-copy-code="go-client-example">Copy</button></div>
+          <pre id="go-client-example"><code data-language="go">package lockgateclient
+
+import (
+    "bytes"
+    "context"
+    "crypto/rand"
+    "encoding/hex"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "net/http"
+    "net/url"
+    "strings"
+    "time"
+)
+
+type Client struct {
+    url, token string
+    http       *http.Client
+}
+
+type accessResponse struct {
+    Status     string                       `json:"status"`
+    RequestID  string                       `json:"request_id"`
+    RetryAfter int                          `json:"retry_after"`
+    Secrets    map[string]map[string]string `json:"secrets"`
+}
+
+func New(url, token string) *Client {
+    return &amp;Client{
+        url:   strings.TrimRight(url, "/"),
+        token: token,
+        http: &amp;http.Client{
+            Timeout: 15 * time.Second,
+            CheckRedirect: func(*http.Request, []*http.Request) error {
+                return http.ErrUseLastResponse // Never forward a token to another origin.
+            },
+        },
+    }
+}
+
+func (c *Client) GetConfig(ctx context.Context) (map[string]string, error) {
+    instance := make([]byte, 24)
+    if _, err := rand.Read(instance); err != nil {
+        return nil, errors.New("lockgate: cannot create request identity")
+    }
+
+    result, err := c.call(ctx, http.MethodPost, "/api/v1/access", []byte(`{}`), hex.EncodeToString(instance))
+    for err == nil {
+        switch result.Status {
+        case "approved":
+            if len(result.Secrets) != 1 {
+                return nil, errors.New("lockgate: expected one configured bundle")
+            }
+            for _, values := range result.Secrets {
+                return values, nil
+            }
+        case "denied":
+            return nil, errors.New("lockgate: access denied by administrator")
+        case "waiting_approval":
+            if result.RequestID == "" || strings.ContainsAny(result.RequestID, "/?#") {
+                return nil, errors.New("lockgate: response has an invalid request ID")
+            }
+            delay := max(result.RetryAfter, 3)
+            select {
+            case &lt;-ctx.Done():
+                return nil, ctx.Err()
+            case &lt;-time.After(time.Duration(delay) * time.Second):
+            }
+            result, err = c.call(ctx, http.MethodGet, "/api/v1/access/"+url.PathEscape(result.RequestID), nil, "")
+        default:
+            return nil, fmt.Errorf("lockgate: unexpected status %q", result.Status)
+        }
+    }
+    return nil, err
+}
+
+func (c *Client) call(ctx context.Context, method, path string, body []byte, idempotencyKey string) (accessResponse, error) {
+    var result accessResponse
+    base, err := url.Parse(c.url)
+    if err != nil || base.Host == "" || (base.Scheme != "https" &amp;&amp; base.Scheme != "http") || base.User != nil || base.Path != "" {
+        return result, errors.New("lockgate: URL must be an HTTP(S) origin")
+    }
+    request, err := http.NewRequestWithContext(ctx, method, c.url+path, bytes.NewReader(body))
+    if err != nil {
+        return result, err
+    }
+    request.Header.Set("Authorization", "Bearer "+c.token)
+    if body != nil {
+        request.Header.Set("Content-Type", "application/json")
+    }
+    if idempotencyKey != "" {
+        request.Header.Set("Idempotency-Key", idempotencyKey)
+    }
+
+    response, err := c.http.Do(request)
+    if err != nil {
+        return result, errors.New("lockgate: server unreachable or request timed out")
+    }
+    defer response.Body.Close()
+    if response.StatusCode != http.StatusOK &amp;&amp; response.StatusCode != http.StatusAccepted {
+        return result, fmt.Errorf("lockgate: request rejected (HTTP %d)", response.StatusCode)
+    }
+    if err := json.NewDecoder(io.LimitReader(response.Body, 16&lt;&lt;20)).Decode(&amp;result); err != nil {
+        return result, errors.New("lockgate: invalid server response")
+    }
+    return result, nil
+}</code></pre>
+        </div>
+      </div>
+
+      <h3>What the clients do</h3>
+      <ol class="steps compact">
+        <li><span>1</span><div><strong>Identify the application</strong><p>Send <code>POST /api/v1/access</code> with the bearer token and an idempotency key. No path or environment is sent.</p></div></li>
+        <li><span>2</span><div><strong>Wait for a decision</strong><p>Poll the opaque request ID while the status is <code>waiting_approval</code>.</p></div></li>
+        <li><span>3</span><div><strong>Return key/value data</strong><p>After approval, return the application’s assigned secret bundle. Values remain in process memory.</p></div></li>
+        <li><span>4</span><div><strong>Fail closed</strong><p>Denial, timeout, an unreachable server, or an invalid response returns an error.</p></div></li>
+      </ol>
+
+      <h3>Where paths and environment belong</h3>
+      <p>The application does not send either value. Its token already identifies the application and environment. Paths remain an admin-side organization and authorization tool.</p>
+    </section>
+
+    <section id="responses" class="panel docs-section">
+      <h2>API responses</h2>
+      <div class="docs-table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>Application action</th></tr></thead><tbody>
+        <tr><td><code>waiting_approval</code></td><td>An administrator has not decided yet.</td><td>Poll after <code>retry_after</code> seconds.</td></tr>
+        <tr><td><code>approved</code></td><td>The response contains the requested secrets.</td><td>Configure dependencies and finish startup.</td></tr>
+        <tr><td><code>denied</code></td><td>An administrator denied this request.</td><td>Fail startup and report a clear error.</td></tr>
+        <tr><td><code>revoked</code></td><td>The previous grant is no longer active.</td><td>Submit a new access request.</td></tr>
+        <tr><td><code>401</code></td><td>The token is invalid, rotated, or the application is disabled.</td><td>Stop and fix application credentials.</td></tr>
+        <tr><td><code>403</code></td><td>A path is outside the application's allowed boundary.</td><td>Stop; the request will not enter approvals.</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section id="security" class="panel docs-section">
+      <h2>Security notes</h2>
+      <ul class="docs-list">
+        <li>Use HTTPS whenever LockGate is reached across a network.</li>
+        <li>Set a startup timeout. The application must not silently continue when protected secrets are unavailable.</li>
+        <li>Never log application tokens, secret responses, decrypted values, or request bodies containing secrets.</li>
+        <li>Request only the paths the process needs. LockGate rejects paths outside the configured application boundary.</li>
+        <li>Revocation blocks future retrieval. It cannot remove secrets already delivered into an application's memory.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+{{template "bottom" .}}{{end}}

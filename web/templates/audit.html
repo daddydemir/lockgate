@@ -1,0 +1,1 @@
+{{define "audit"}}{{template "top" .}}<p class="subtitle">A record of access and changes. No secret values, passwords, or tokens.</p><section class="panel"><div class="panel-heading"><h2>Workspace activity</h2><span class="subtle">Latest 200 events · UTC</span></div>{{template "eventtable" .Events}}</section>{{template "bottom" .}}{{end}}

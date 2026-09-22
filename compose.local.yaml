@@ -1,0 +1,42 @@
+# Local development. For remote use, set an HTTPS origin, turn off the insecure
+# cookie opt-in, and put LockGate behind your TLS reverse proxy.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lockgate
+      POSTGRES_DB: lockgate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lockgate -d lockgate"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  lockgate:
+    image: lockgate:local
+    build: .
+    user: "${LOCKGATE_UID:-10001}:${LOCKGATE_GID:-10001}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATABASE_URL: postgres://lockgate:${POSTGRES_PASSWORD}@postgres:5432/lockgate?sslmode=disable
+      LOCKGATE_MASTER_KEY_FILE: /run/secrets/lockgate-master-key
+      LOCKGATE_ADDR: 0.0.0.0:8080
+      LOCKGATE_ORIGIN: ${LOCKGATE_ORIGIN:-http://localhost:8080}
+      LOCKGATE_INSECURE_DEV_COOKIES: ${LOCKGATE_INSECURE_DEV_COOKIES:-true}
+    volumes:
+      - ./.local/master.key:/run/secrets/lockgate-master-key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+volumes:
+  postgres-data:

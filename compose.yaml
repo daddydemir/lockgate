@@ -1,0 +1,33 @@
+# Uses an existing PostgreSQL server. No local database or Redis is started.
+services:
+  lockgate:
+    image: lockgate:local
+    build: .
+    user: "${LOCKGATE_UID:-10001}:${LOCKGATE_GID:-10001}"
+    ports:
+      - "${LOCKGATE_BIND:-127.0.0.1}:${LOCKGATE_PORT:-18430}:8080"
+    environment:
+      POSTGRE_DSN: ${POSTGRE_DSN:?Set POSTGRE_DSN in .env}
+      LOCKGATE_MASTER_KEY_FILE: /run/secrets/lockgate-master-key
+      LOCKGATE_ADDR: 0.0.0.0:8080
+      LOCKGATE_ORIGIN: ${LOCKGATE_ORIGIN:?Set the external origin in .env}
+      LOCKGATE_INSECURE_DEV_COOKIES: ${LOCKGATE_INSECURE_DEV_COOKIES:-false}
+    volumes:
+      - type: bind
+        source: ./.local/master.key
+        target: /run/secrets/lockgate-master-key
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped

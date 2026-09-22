@@ -1,0 +1,23 @@
+[Unit]
+Description=LockGate secret management
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lockgate
+Group=lockgate
+EnvironmentFile=/etc/lockgate/lockgate.env
+ExecStart=/usr/local/bin/lockgate serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/lockgate
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
