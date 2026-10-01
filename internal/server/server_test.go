@@ -147,8 +147,12 @@ func TestHTTPWorkflow(t *testing.T) {
 		t.Fatal("invalid service worker", worker.Code, worker.Header())
 	}
 	docs := do("GET", "/admin/docs", nil, cookie)
-	if !strings.Contains(docs.Body.String(), "https://lockgate.test/api/v1/access") || !strings.Contains(docs.Body.String(), "No LockGate SDK or Go package is required") || !strings.Contains(docs.Body.String(), "There is no published") || !strings.Contains(docs.Body.String(), "Language-independent protocol contract") || !strings.Contains(docs.Body.String(), "examples/lockgate.mjs") || !strings.Contains(docs.Body.String(), "examples/lockgate.py") {
+	if !strings.Contains(docs.Body.String(), "https://lockgate.test/api/v1/access") || !strings.Contains(docs.Body.String(), "lockgate-client@0.1.0") || !strings.Contains(docs.Body.String(), "github.com/daddydemir/lockgate/pkg/client@v0.1.0") || !strings.Contains(docs.Body.String(), "Language-independent protocol contract") {
 		t.Fatal("documentation is missing configured API or language-neutral guidance")
+	}
+	publicDocs := do("GET", "/docs", nil, nil)
+	if publicDocs.Code != 200 || !strings.Contains(publicDocs.Body.String(), "LOCKGATE DEVELOPERS") || strings.Contains(publicDocs.Body.String(), "Sign out") || strings.Contains(publicDocs.Body.String(), `name="csrf"`) {
+		t.Fatal("public documentation is unavailable or exposes admin controls")
 	}
 	audit := do("GET", "/admin/audit", nil, cookie)
 	if strings.Contains(audit.Body.String(), token) || strings.Contains(audit.Body.String(), "sensitive-value") {

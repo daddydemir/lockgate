@@ -1,4 +1,4 @@
-{{define "docs"}}{{template "top" .}}
+{{define "docs"}}{{if .Username}}{{template "top" .}}{{else}}{{template "publictop" .}}{{end}}
 <p class="subtitle">Connect an application, request its secrets, and wait for administrator approval.</p>
 
 <div class="docs-layout">
@@ -50,9 +50,9 @@ LOCKGATE_TOKEN=lg_app_your_token_here</code></pre>
       <h2>Choose an integration</h2>
       <p>The server API is language independent. These options differ only in how much polling and error handling you want to write yourself.</p>
       <div class="client-grid">
-        <article><strong>Go</strong><span>Included helper</span><p>Use <code>pkg/client</code> in this source tree or copy the documented implementation.</p><a href="#panel-go" data-open-code-tab="tab-go">View Go setup →</a></article>
-        <article><strong>Node.js</strong><span>Zero dependencies</span><p>Download one ESM file with timeout, cancellation, polling, and redirect protection.</p><a href="{{asset "examples/lockgate.mjs"}}" download>Download lockgate.mjs ↓</a></article>
-        <article><strong>Python</strong><span>Standard library only</span><p>Download one Python module. No pip package or third-party dependency is required.</p><a href="{{asset "examples/lockgate.py"}}" download>Download lockgate.py ↓</a></article>
+        <article><strong>Go</strong><span>Go module · v0.1.0</span><p>Install the published module and call <code>GetConfig</code> during startup.</p><a href="#panel-go" data-open-code-tab="tab-go">View Go setup →</a></article>
+        <article><strong>Node.js</strong><span>npm · zero dependencies</span><p>Install <code>lockgate-client</code> from npm with TypeScript declarations included.</p><a href="#panel-javascript" data-open-code-tab="tab-javascript">View Node.js setup →</a></article>
+        <article><strong>Python</strong><span>PyPI · standard library only</span><p>Install the typed <code>lockgate-client</code> package from PyPI.</p><a href="#panel-python" data-open-code-tab="tab-python">View Python setup →</a></article>
         <article><strong>Any language</strong><span>JSON over HTTP</span><p>Implement the small state machine using your language's HTTP client.</p><a href="#protocol">Read the protocol →</a></article>
       </div>
       <div class="notice"><strong>No official external SDK is required.</strong> Go, Node.js, and Python integrations use the same API and security behavior. Java, PHP, Rust, C#, Ruby, and other clients can follow the protocol contract below.</div>
@@ -107,7 +107,7 @@ loop:
 
     <section id="languages" class="panel docs-section">
       <h2>Language examples</h2>
-      <p>Go uses the included helper. Node.js and Python use downloadable, dependency-free client files with equivalent behavior.</p>
+      <p>Official Go, npm, and PyPI packages provide the same polling, timeout, redirect protection, and fail-closed behavior.</p>
 
       <div class="code-tabs" data-code-tabs>
         <div class="code-tab-list" role="tablist" aria-label="Language examples">
@@ -118,10 +118,12 @@ loop:
         </div>
 
         <div role="tabpanel" id="panel-javascript" aria-labelledby="tab-javascript">
-          <div class="client-panel-head"><div><strong>Node.js 18+</strong><span>ES module · zero dependencies</span></div><a class="button small" href="{{asset "examples/lockgate.mjs"}}" download>Download client</a></div>
-          <p>Save the downloaded file as <code>internal/lockgate.mjs</code>, then call it during application startup:</p>
+          <div class="client-panel-head"><div><strong>Node.js 18+</strong><span>npm package · ES module · zero dependencies</span></div><a class="button small" href="https://www.npmjs.com/package/lockgate-client" rel="external">View npm package</a></div>
+          <div class="code-heading"><span>Install</span><button type="button" class="small" data-copy-code="javascript-install">Copy</button></div>
+          <pre id="javascript-install"><code data-language="bash">npm install lockgate-client@0.1.0</code></pre>
+          <p>Call the client before starting services that require protected configuration:</p>
           <div class="code-heading"><span>startup.mjs</span><button type="button" class="small" data-copy-code="javascript-example">Copy</button></div>
-          <pre id="javascript-example"><code data-language="javascript">import { LockGateClient } from "./internal/lockgate.mjs";
+          <pre id="javascript-example"><code data-language="javascript">import { LockGateClient } from "lockgate-client";
 
 const client = new LockGateClient({
   url: process.env.LOCKGATE_URL,
@@ -142,11 +144,13 @@ try {
         </div>
 
         <div role="tabpanel" id="panel-python" aria-labelledby="tab-python" hidden>
-          <div class="client-panel-head"><div><strong>Python 3.10+</strong><span>Standard library only · no pip install</span></div><a class="button small" href="{{asset "examples/lockgate.py"}}" download>Download client</a></div>
-          <p>Save the downloaded file as <code>lockgate.py</code> inside your project, then call it before starting services that require secrets:</p>
+          <div class="client-panel-head"><div><strong>Python 3.10+</strong><span>PyPI package · standard library only</span></div><a class="button small" href="https://pypi.org/project/lockgate-client/" rel="external">View PyPI package</a></div>
+          <div class="code-heading"><span>Install</span><button type="button" class="small" data-copy-code="python-install">Copy</button></div>
+          <pre id="python-install"><code data-language="bash">python -m pip install lockgate-client==0.1.0</code></pre>
+          <p>Call the client before starting services that require protected configuration:</p>
           <div class="code-heading"><span>startup.py</span><button type="button" class="small" data-copy-code="python-example">Copy</button></div>
           <pre id="python-example"><code data-language="python">import os
-from lockgate import LockGateClient
+from lockgate_client import LockGateClient
 
 client = LockGateClient(
     url=os.environ["LOCKGATE_URL"],
@@ -160,7 +164,9 @@ db_password = values["DB_PASSWORD"]
         </div>
 
         <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" hidden>
-          <div class="notice"><strong>There is no published LockGate Go package.</strong> No external SDK is required: copy the small client below into your project, or import <code>pkg/client</code> when working inside this source module.</div>
+          <div class="client-panel-head"><div><strong>Go 1.26+</strong><span>Published Go module · v0.1.0</span></div><a class="button small" href="https://pkg.go.dev/github.com/daddydemir/lockgate/pkg/client" rel="external">View Go package</a></div>
+          <div class="code-heading"><span>Install</span><button type="button" class="small" data-copy-code="go-install">Copy</button></div>
+          <pre id="go-install"><code data-language="bash">go get github.com/daddydemir/lockgate/pkg/client@v0.1.0</code></pre>
           <div class="code-heading"><span>main.go · application usage</span><button type="button" class="small" data-copy-code="go-example">Copy</button></div>
           <pre id="go-example"><code data-language="go">package main
 
@@ -170,11 +176,14 @@ import (
     "os"
     "time"
 
-    lockgate "your-project/internal/lockgateclient"
+    lockgate "github.com/daddydemir/lockgate/pkg/client"
 )
 
 func main() {
-    client := lockgate.New(os.Getenv("LOCKGATE_URL"), os.Getenv("LOCKGATE_TOKEN"))
+    client := lockgate.New(lockgate.Config{
+        URL:   os.Getenv("LOCKGATE_URL"),
+        Token: os.Getenv("LOCKGATE_TOKEN"),
+    })
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
     defer cancel()
 
@@ -186,8 +195,8 @@ func main() {
     _ = dbPassword // Pass it to your database config; never log it.
 }</code></pre>
 
-          <h3>Go client implementation</h3>
-          <p>This is the complete client used by the example. It sends only the token, waits at the server-advised interval, and fails closed on denial or malformed responses.</p>
+          <h3>How the Go client works</h3>
+          <p>This compact reference implementation shows the package's request and polling flow. The published package additionally validates response shapes, handles revocation, and exposes typed helpers.</p>
           <div class="code-heading"><span>internal/lockgateclient/client.go</span><button type="button" class="small" data-copy-code="go-client-example">Copy</button></div>
           <pre id="go-client-example"><code data-language="go">package lockgateclient
 

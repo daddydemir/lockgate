@@ -106,4 +106,4 @@ Tests used disposable credentials and isolated schemas. The initial validation d
 - Prepared `lockgate-client` version `0.1.0` for PyPI as a typed, standard-library-only wheel with legacy/new setuptools-compatible metadata, package documentation, and unittest coverage.
 - Added `make sdk-test` to verify Go, Node.js, Python, redirect protection, approval polling, and exact synchronization between package sources and in-app downloadable clients.
 - npm pack and Python wheel builds passed. Clean consumer projects imported the npm tarball, Python wheel, and Go module path successfully. Package artifacts and checksums are stored under `dist/sdk`.
-- Registry availability checks returned 404 for npm `lockgate-client`, npm `@lockgate/client`, PyPI `lockgate-client`, and PyPI `lockgate` at preparation time. No registry publication or Git push was performed.
+- Published version `0.1.0` as `lockgate-client` on npm and PyPI, and tagged the Go module as `v0.1.0`. Clean registry installs and a Go proxy import/build passed.

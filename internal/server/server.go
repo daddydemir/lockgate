@@ -20,10 +20,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
 	"github.com/daddydemir/lockgate/web"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Config struct {
@@ -131,6 +131,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/admin", http.StatusSeeOther) })
 	s.mux.HandleFunc("GET /admin/login", s.loginPage)
 	s.mux.HandleFunc("POST /admin/login", s.login)
+	s.mux.HandleFunc("GET /docs", s.docs)
 	s.mux.HandleFunc("POST /api/v1/access", s.access)
 	s.mux.HandleFunc("GET /api/v1/access/{id}", s.poll)
 	s.admin("GET /admin", s.dashboard)
