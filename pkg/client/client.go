@@ -58,7 +58,7 @@ func (c *Client) GetConfig(ctx context.Context) (map[string]string, error) {
 }
 
 func New(c Config) *Client {
-	if c.PollInterval < time.Second {
+	if c.PollInterval < 3*time.Second {
 		c.PollInterval = 3 * time.Second
 	}
 	c.URL = strings.TrimRight(c.URL, "/")

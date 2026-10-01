@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	lockgate "lockgate/pkg/client"
+	lockgate "github.com/daddydemir/lockgate/pkg/client"
 	"log"
 	"os"
 	"time"

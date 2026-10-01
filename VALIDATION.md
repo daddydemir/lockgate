@@ -81,3 +81,29 @@ Tests used disposable credentials and isolated schemas. The initial validation d
 - Added SHA-256 content-versioned asset URLs and `public, max-age=31536000, immutable` caching for embedded static files. Sensitive HTML and API responses remain `no-store`.
 - Live Chromium measurements on the same route sequence improved authenticated page loads from 228–361 ms to 112–205 ms. Static headers and automatic hash changes were verified over public HTTPS.
 - `go test -count=1 -p 1 ./...` and `go vet -p 1 ./...` passed; the rebuilt container is healthy.
+
+## Mobile UI and PWA
+
+- Reworked the small-screen shell with a fixed six-item bottom navigation, safe-area insets, sticky header, touch-sized controls, responsive cards/forms/actions, contained tables and code blocks, and iOS-safe input sizing.
+- Added a standalone web app manifest, SVG/favicon metadata, Apple touch icon, 192px/512px icons, and a maskable 512px icon based on the LockGate lock mark.
+- Added a root-scoped service worker that caches only versioned `/static/` assets. Admin HTML, API responses, tokens, and decrypted secret values remain network-only; offline navigation returns a static connection-required page.
+- Chromium at a 390x844 touch viewport verified login and all six admin screens without page-level horizontal overflow, visible bottom navigation, manifest/maskable icon metadata, active service worker scope, and the safe offline screen. A final visual check verified primary action contrast.
+- Manifest JSON, PNG dimensions, JavaScript syntax, `go test -count=1 -p 1 ./...`, and `go vet -p 1 ./...` passed; the rebuilt container is healthy.
+- The service worker itself uses a SHA-256-versioned URL and explicit root scope, preventing CDN caching from delaying PWA updates. Its active script URL was verified in live Chromium.
+
+## Developer-friendly multi-language documentation
+
+- Audited non-Go integration examples and replaced incomplete inline polling snippets with downloadable, zero-dependency Node.js and standard-library-only Python clients.
+- Both clients implement token-only access, stable per-startup idempotency, a three-second minimum/server-advised polling interval, request and startup timeouts, cancellation, revoked/denied states, response-size and shape validation, cross-origin redirect blocking, and fail-closed errors.
+- Added an integration chooser, copy-ready usage examples, an “Any language” tab, a language-independent state-machine contract, required client safeguards, approved payload example, and HTTP 200/202/400/401/403/404/409/415/500 behavior.
+- Node.js and Python clients passed mock `waiting_approval -> approved` workflows and cross-origin redirect token-leak tests. Syntax validation, `go test -count=1 -p 1 ./...`, and `go vet -p 1 ./...` passed.
+- Live Chromium verified content-hashed downloads, all language tabs, Go deep-link navigation, protocol content, mobile containment, and no page errors. The rebuilt container is healthy.
+
+## Publishable client SDKs
+
+- Changed the Go module path to `github.com/daddydemir/lockgate`, making `github.com/daddydemir/lockgate/pkg/client` a valid public import after the repository changes are pushed and tagged.
+- Prepared `lockgate-client` version `0.1.0` for npm as a dependency-free ESM package with TypeScript declarations, package metadata, usage documentation, and Node test coverage.
+- Prepared `lockgate-client` version `0.1.0` for PyPI as a typed, standard-library-only wheel with legacy/new setuptools-compatible metadata, package documentation, and unittest coverage.
+- Added `make sdk-test` to verify Go, Node.js, Python, redirect protection, approval polling, and exact synchronization between package sources and in-app downloadable clients.
+- npm pack and Python wheel builds passed. Clean consumer projects imported the npm tarball, Python wheel, and Go module path successfully. Package artifacts and checksums are stored under `dist/sdk`.
+- Registry availability checks returned 404 for npm `lockgate-client`, npm `@lockgate/client`, PyPI `lockgate-client`, and PyPI `lockgate` at preparation time. No registry publication or Git push was performed.

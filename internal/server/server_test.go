@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"lockgate/internal/store"
-	"lockgate/internal/testutil"
-	lockgate "lockgate/pkg/client"
+	"github.com/daddydemir/lockgate/internal/store"
+	"github.com/daddydemir/lockgate/internal/testutil"
+	lockgate "github.com/daddydemir/lockgate/pkg/client"
 )
 
 func TestHTTPWorkflow(t *testing.T) {
@@ -132,8 +132,22 @@ func TestHTTPWorkflow(t *testing.T) {
 	if asset.Code != 200 || asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Fatal("static assets are not cacheable", asset.Code, asset.Header().Get("Cache-Control"))
 	}
+	for _, clientPath := range []string{"/static/examples/lockgate.mjs", "/static/examples/lockgate.py"} {
+		clientFile := do("GET", clientPath, nil, nil)
+		if clientFile.Code != 200 || !strings.Contains(clientFile.Body.String(), "waiting_approval") {
+			t.Fatal("downloadable client is unavailable", clientPath, clientFile.Code)
+		}
+	}
+	manifest := do("GET", "/manifest.webmanifest", nil, nil)
+	if manifest.Code != 200 || manifest.Header().Get("Content-Type") != "application/manifest+json" || !strings.Contains(manifest.Body.String(), `"display": "standalone"`) {
+		t.Fatal("invalid PWA manifest", manifest.Code, manifest.Header().Get("Content-Type"))
+	}
+	worker := do("GET", "/sw.js", nil, nil)
+	if worker.Code != 200 || worker.Header().Get("Service-Worker-Allowed") != "/" || !strings.Contains(worker.Body.String(), "url.pathname.startsWith('/static/')") {
+		t.Fatal("invalid service worker", worker.Code, worker.Header())
+	}
 	docs := do("GET", "/admin/docs", nil, cookie)
-	if !strings.Contains(docs.Body.String(), "https://lockgate.test/api/v1/access") || !strings.Contains(docs.Body.String(), "No LockGate SDK or Go package is required") || !strings.Contains(docs.Body.String(), "There is no published") {
+	if !strings.Contains(docs.Body.String(), "https://lockgate.test/api/v1/access") || !strings.Contains(docs.Body.String(), "No LockGate SDK or Go package is required") || !strings.Contains(docs.Body.String(), "There is no published") || !strings.Contains(docs.Body.String(), "Language-independent protocol contract") || !strings.Contains(docs.Body.String(), "examples/lockgate.mjs") || !strings.Contains(docs.Body.String(), "examples/lockgate.py") {
 		t.Fatal("documentation is missing configured API or language-neutral guidance")
 	}
 	audit := do("GET", "/admin/audit", nil, cookie)

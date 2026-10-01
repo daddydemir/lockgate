@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"lockgate/internal/secure"
-	"lockgate/migrations"
+	"github.com/daddydemir/lockgate/internal/secure"
+	"github.com/daddydemir/lockgate/migrations"
 )
 
 var (

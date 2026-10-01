@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"lockgate/internal/store"
-	"lockgate/internal/testutil"
+	"github.com/daddydemir/lockgate/internal/store"
+	"github.com/daddydemir/lockgate/internal/testutil"
 	"sync"
 	"testing"
 )

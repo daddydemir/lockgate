@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"lockgate/internal/secure"
-	"lockgate/internal/store"
-	"lockgate/web"
+	"github.com/daddydemir/lockgate/internal/secure"
+	"github.com/daddydemir/lockgate/internal/store"
+	"github.com/daddydemir/lockgate/web"
 )
 
 type Config struct {
@@ -66,7 +66,7 @@ func New(s *store.Store, c Config) (*Server, error) {
 		return nil, errors.New("HTTPS origin required unless explicitly enabling insecure development cookies")
 	}
 	assets := map[string]string{}
-	for _, name := range []string{"app.css", "app.js", "theme-init.js", "favicon.svg"} {
+	for _, name := range []string{"app.css", "app.js", "theme-init.js", "favicon.svg", "apple-touch-icon.png", "sw.js", "examples/lockgate.mjs", "examples/lockgate.py"} {
 		body, err := web.FS.ReadFile("static/" + name)
 		if err != nil {
 			return nil, err
@@ -91,8 +91,34 @@ func (s *Server) routes() {
 	files := http.StripPrefix("/static/", http.FileServer(http.FS(static)))
 	s.mux.Handle("GET /static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		if r.URL.Path == "/static/sw.js" {
+			w.Header().Set("Service-Worker-Allowed", "/")
+		}
 		files.ServeHTTP(w, r)
 	}))
+	s.mux.HandleFunc("GET /manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
+		body, err := web.FS.ReadFile("static/manifest.webmanifest")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/manifest+json")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write(body)
+	})
+	s.mux.HandleFunc("GET /sw.js", func(w http.ResponseWriter, r *http.Request) {
+		body, err := web.FS.ReadFile("static/sw.js")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, max-age=0, must-revalidate")
+		w.Header().Set("CDN-Cache-Control", "no-store")
+		w.Header().Set("Cloudflare-CDN-Cache-Control", "no-store")
+		w.Header().Set("Service-Worker-Allowed", "/")
+		_, _ = w.Write(body)
+	})
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

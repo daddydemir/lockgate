@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"lockgate/internal/secure"
-	"lockgate/internal/server"
-	"lockgate/internal/store"
+	"github.com/daddydemir/lockgate/internal/secure"
+	"github.com/daddydemir/lockgate/internal/server"
+	"github.com/daddydemir/lockgate/internal/store"
 )
 
 func main() {

@@ -6,7 +6,9 @@
     <p class="eyebrow">ON THIS PAGE</p>
     <a href="#quick-start">Quick start</a>
     <a href="#environment">Configuration</a>
+    <a href="#clients">Choose a client</a>
     <a href="#curl">API with curl</a>
+    <a href="#protocol">Protocol contract</a>
     <a href="#languages">Language examples</a>
     <a href="#responses">Responses</a>
     <a href="#security">Security notes</a>
@@ -43,6 +45,19 @@ LOCKGATE_TOKEN=lg_app_your_token_here</code></pre>
       LOCKGATE_TOKEN: ${LOCKGATE_TOKEN}</code></pre>
     </section>
 
+    <section id="clients" class="panel docs-section">
+      <span class="badge green">COPY &amp; RUN</span>
+      <h2>Choose an integration</h2>
+      <p>The server API is language independent. These options differ only in how much polling and error handling you want to write yourself.</p>
+      <div class="client-grid">
+        <article><strong>Go</strong><span>Included helper</span><p>Use <code>pkg/client</code> in this source tree or copy the documented implementation.</p><a href="#panel-go" data-open-code-tab="tab-go">View Go setup →</a></article>
+        <article><strong>Node.js</strong><span>Zero dependencies</span><p>Download one ESM file with timeout, cancellation, polling, and redirect protection.</p><a href="{{asset "examples/lockgate.mjs"}}" download>Download lockgate.mjs ↓</a></article>
+        <article><strong>Python</strong><span>Standard library only</span><p>Download one Python module. No pip package or third-party dependency is required.</p><a href="{{asset "examples/lockgate.py"}}" download>Download lockgate.py ↓</a></article>
+        <article><strong>Any language</strong><span>JSON over HTTP</span><p>Implement the small state machine using your language's HTTP client.</p><a href="#protocol">Read the protocol →</a></article>
+      </div>
+      <div class="notice"><strong>No official external SDK is required.</strong> Go, Node.js, and Python integrations use the same API and security behavior. Java, PHP, Rust, C#, Ruby, and other clients can follow the protocol contract below.</div>
+    </section>
+
     <section id="curl" class="panel docs-section">
       <h2>Raw HTTP API with curl</h2>
       <p>Start an access request with an application token. The idempotency key identifies one running instance; use a different value for every replica.</p>
@@ -60,84 +75,88 @@ LOCKGATE_TOKEN=lg_app_your_token_here</code></pre>
   --header "Authorization: Bearer $LOCKGATE_TOKEN"</code></pre>
     </section>
 
+    <section id="protocol" class="panel docs-section">
+      <h2>Language-independent protocol contract</h2>
+      <p>Use this checklist when integrating a language that does not have a ready-to-copy client above.</p>
+      <ol class="protocol-list">
+        <li><strong>Configure an origin and token.</strong><span><code>LOCKGATE_URL</code> must be an HTTP(S) origin without a path. Send <code>Authorization: Bearer …</code> on every machine API request.</span></li>
+        <li><strong>Create one startup identity.</strong><span>Generate a random <code>Idempotency-Key</code> once per process startup. Keep it unchanged while retrying that startup; use a different value for every replica.</span></li>
+        <li><strong>Start access.</strong><span>Send <code>POST /api/v1/access</code>, <code>Content-Type: application/json</code>, and body <code>{}</code>. LockGate resolves application, environment, and assigned secrets from the token.</span></li>
+        <li><strong>Wait without hammering.</strong><span>For <code>waiting_approval</code>, wait at least <code>max(3, retry_after)</code> seconds, URL-encode the opaque <code>request_id</code>, then call <code>GET /api/v1/access/{request_id}</code>.</span></li>
+        <li><strong>Finish or fail closed.</strong><span>Return values only for <code>approved</code>. Fail startup for <code>denied</code>, timeout, invalid JSON, unexpected status, or network failure. For <code>revoked</code>, submit a new POST to begin a fresh approval.</span></li>
+      </ol>
+      <h3>Required client safeguards</h3>
+      <ul class="docs-list checklist">
+        <li>Set a per-request timeout (the examples use 15 seconds) and an overall startup deadline (the examples use 10 minutes).</li>
+        <li>Disable cross-origin HTTP redirects so the bearer token cannot be forwarded to another host.</li>
+        <li>Accept HTTP <code>200</code> and <code>202</code> only; treat every other status as an error before parsing secrets.</li>
+        <li>Limit response size, validate the JSON shape, and never log response bodies, tokens, or decrypted values.</li>
+        <li>Keep secrets in process memory and pass them directly to database, SDK, or service configuration.</li>
+      </ul>
+      <div class="code-heading"><span>State machine · pseudocode</span><button type="button" class="small" data-copy-code="protocol-pseudocode">Copy</button></div>
+      <pre id="protocol-pseudocode"><code data-language="text">instance_key = random_id()
+response = POST /api/v1/access  body={}  idempotency_key=instance_key
+
+loop:
+  approved         -> return the configured secret bundle
+  waiting_approval -> wait retry_after, then GET /api/v1/access/{request_id}
+  revoked          -> POST /api/v1/access again with the same startup identity
+  denied           -> fail startup
+  anything else    -> fail startup</code></pre>
+    </section>
+
     <section id="languages" class="panel docs-section">
       <h2>Language examples</h2>
-      <p>Each example uses the same token-only HTTP flow. Choose your language.</p>
+      <p>Go uses the included helper. Node.js and Python use downloadable, dependency-free client files with equivalent behavior.</p>
 
       <div class="code-tabs" data-code-tabs>
         <div class="code-tab-list" role="tablist" aria-label="Language examples">
           <button type="button" role="tab" id="tab-javascript" aria-controls="panel-javascript" aria-selected="true">JavaScript</button>
           <button type="button" role="tab" id="tab-python" aria-controls="panel-python" aria-selected="false" tabindex="-1">Python</button>
           <button type="button" role="tab" id="tab-go" aria-controls="panel-go" aria-selected="false" tabindex="-1">Go</button>
+          <button type="button" role="tab" id="tab-any" aria-controls="panel-any" aria-selected="false" tabindex="-1">Any language</button>
         </div>
 
         <div role="tabpanel" id="panel-javascript" aria-labelledby="tab-javascript">
-          <div class="code-heading"><span>startup.mjs · Node.js 18+</span><button type="button" class="small" data-copy-code="javascript-example">Copy</button></div>
-          <pre id="javascript-example"><code data-language="javascript">const url = process.env.LOCKGATE_URL;
-const token = process.env.LOCKGATE_TOKEN;
-const headers = {
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-  "Idempotency-Key": crypto.randomUUID(),
-};
+          <div class="client-panel-head"><div><strong>Node.js 18+</strong><span>ES module · zero dependencies</span></div><a class="button small" href="{{asset "examples/lockgate.mjs"}}" download>Download client</a></div>
+          <p>Save the downloaded file as <code>internal/lockgate.mjs</code>, then call it during application startup:</p>
+          <div class="code-heading"><span>startup.mjs</span><button type="button" class="small" data-copy-code="javascript-example">Copy</button></div>
+          <pre id="javascript-example"><code data-language="javascript">import { LockGateClient } from "./internal/lockgate.mjs";
 
-let response = await fetch(`${url}/api/v1/access`, {
-  method: "POST",
-  headers,
-  body: JSON.stringify({}),
+const client = new LockGateClient({
+  url: process.env.LOCKGATE_URL,
+  token: process.env.LOCKGATE_TOKEN,
 });
-let access = await response.json();
 
-while (access.status === "waiting_approval") {
-  await new Promise(resolve =&gt; setTimeout(resolve, access.retry_after * 1000));
-  response = await fetch(`${url}/api/v1/access/${access.request_id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  access = await response.json();
-}
+const controller = new AbortController();
+const deadline = setTimeout(() =&gt; controller.abort(), 10 * 60 * 1000);
 
-if (access.status !== "approved") throw new Error(`Access ${access.status}`);
-const bundles = Object.values(access.secrets);
-if (bundles.length !== 1) throw new Error("Expected one configured bundle");
-const values = bundles[0];</code></pre>
+try {
+  const values = await client.getConfig({ signal: controller.signal });
+  const dbPassword = values.DB_PASSWORD;
+  // Pass values to your service configuration. Never log them.
+} finally {
+  clearTimeout(deadline);
+}</code></pre>
+          <ul class="client-features"><li>15-second request timeout</li><li>10-minute caller deadline</li><li>Redirect blocking</li><li>Server-advised polling</li><li>Typed error codes</li></ul>
         </div>
 
         <div role="tabpanel" id="panel-python" aria-labelledby="tab-python" hidden>
-          <div class="code-heading"><span>startup.py · Python 3</span><button type="button" class="small" data-copy-code="python-example">Copy</button></div>
-          <pre id="python-example"><code data-language="python">import json
-import os
-import time
-import urllib.request
-import uuid
+          <div class="client-panel-head"><div><strong>Python 3.10+</strong><span>Standard library only · no pip install</span></div><a class="button small" href="{{asset "examples/lockgate.py"}}" download>Download client</a></div>
+          <p>Save the downloaded file as <code>lockgate.py</code> inside your project, then call it before starting services that require secrets:</p>
+          <div class="code-heading"><span>startup.py</span><button type="button" class="small" data-copy-code="python-example">Copy</button></div>
+          <pre id="python-example"><code data-language="python">import os
+from lockgate import LockGateClient
 
-url = os.environ["LOCKGATE_URL"]
-token = os.environ["LOCKGATE_TOKEN"]
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Content-Type": "application/json",
-    "Idempotency-Key": str(uuid.uuid4()),
-}
-request = urllib.request.Request(
-    f"{url}/api/v1/access", json.dumps({}).encode(), headers
+client = LockGateClient(
+    url=os.environ["LOCKGATE_URL"],
+    token=os.environ["LOCKGATE_TOKEN"],
 )
-with urllib.request.urlopen(request, timeout=15) as response:
-    access = json.load(response)
+values = client.get_config(startup_timeout=600)
 
-while access["status"] == "waiting_approval":
-    time.sleep(max(access.get("retry_after", 3), 3))
-    request = urllib.request.Request(
-        f"{url}/api/v1/access/{access['request_id']}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    with urllib.request.urlopen(request, timeout=15) as response:
-        access = json.load(response)
-
-if access["status"] != "approved":
-    raise RuntimeError(f"LockGate access {access['status']}")
-bundles = list(access["secrets"].values())
-if len(bundles) != 1:
-    raise RuntimeError("Expected one configured bundle")
-values = bundles[0]</code></pre>
+db_password = values["DB_PASSWORD"]
+# Pass values to your service configuration. Never log them.</code></pre>
+          <ul class="client-features"><li>15-second request timeout</li><li>10-minute startup deadline</li><li>Redirect blocking</li><li>Server-advised polling</li><li>Error codes on exceptions</li></ul>
         </div>
 
         <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" hidden>
@@ -280,6 +299,20 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, ide
     return result, nil
 }</code></pre>
         </div>
+
+        <div role="tabpanel" id="panel-any" aria-labelledby="tab-any" hidden>
+          <div class="client-panel-head"><div><strong>Java, PHP, Rust, C#, Ruby, and others</strong><span>Use your standard HTTP client</span></div><a class="button small" href="#protocol">Protocol contract</a></div>
+          <p>You do not need a LockGate-specific package. Implement five states around two HTTP requests:</p>
+          <div class="code-heading"><span>Language-neutral outline</span><button type="button" class="small" data-copy-code="any-language-example">Copy</button></div>
+          <pre id="any-language-example"><code data-language="text">POST /api/v1/access  Authorization: Bearer $LOCKGATE_TOKEN  body: {}
+
+waiting_approval -> wait retry_after -> GET /api/v1/access/{request_id}
+approved         -> read secrets (one configured bundle is recommended)
+denied           -> fail application startup
+revoked          -> start a new POST request
+HTTP/network error -> fail application startup</code></pre>
+          <p class="hint">The protocol section documents timeouts, redirect handling, idempotency, response validation, and every HTTP status your implementation must handle.</p>
+        </div>
       </div>
 
       <h3>What the clients do</h3>
@@ -296,13 +329,30 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, ide
 
     <section id="responses" class="panel docs-section">
       <h2>API responses</h2>
+      <p>Successful machine responses use the state objects below. HTTP errors use <code>{"error":"safe message"}</code>; clients should branch on the HTTP code and must not depend on the message text.</p>
+      <div class="code-heading"><span>Approved · HTTP 200</span><button type="button" class="small" data-copy-code="approved-response">Copy</button></div>
+      <pre id="approved-response"><code data-language="json">{
+  "status": "approved",
+  "secrets": {
+    "apps/crypto-backend/production": {
+      "DB_HOST": "postgres.internal",
+      "DB_USER": "postgres",
+      "DB_PASSWORD": "..."
+    }
+  }
+}</code></pre>
       <div class="docs-table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th><th>Application action</th></tr></thead><tbody>
-        <tr><td><code>waiting_approval</code></td><td>An administrator has not decided yet.</td><td>Poll after <code>retry_after</code> seconds.</td></tr>
-        <tr><td><code>approved</code></td><td>The response contains the requested secrets.</td><td>Configure dependencies and finish startup.</td></tr>
-        <tr><td><code>denied</code></td><td>An administrator denied this request.</td><td>Fail startup and report a clear error.</td></tr>
-        <tr><td><code>revoked</code></td><td>The previous grant is no longer active.</td><td>Submit a new access request.</td></tr>
+        <tr><td><code>202 waiting_approval</code></td><td>An administrator has not decided yet.</td><td>Poll after <code>retry_after</code> seconds.</td></tr>
+        <tr><td><code>200 approved</code></td><td>The response contains assigned secret bundles.</td><td>Validate the shape, configure dependencies, and finish startup.</td></tr>
+        <tr><td><code>200 denied</code></td><td>An administrator denied this request.</td><td>Fail startup and report a clear error.</td></tr>
+        <tr><td><code>200 revoked</code></td><td>The previous grant is no longer active.</td><td>POST again to begin a fresh approval.</td></tr>
+        <tr><td><code>400</code></td><td>Malformed JSON, invalid fields, or an invalid path.</td><td>Stop and fix the request.</td></tr>
         <tr><td><code>401</code></td><td>The token is invalid, rotated, or the application is disabled.</td><td>Stop and fix application credentials.</td></tr>
-        <tr><td><code>403</code></td><td>A path is outside the application's allowed boundary.</td><td>Stop; the request will not enter approvals.</td></tr>
+        <tr><td><code>403</code></td><td>An explicitly requested path is outside the application's boundary.</td><td>Stop; the request will not enter approvals.</td></tr>
+        <tr><td><code>404</code></td><td>No assigned secret exists, or the polling handle is unknown.</td><td>Check admin assignment; do not retry rapidly.</td></tr>
+        <tr><td><code>409</code></td><td>An idempotency key was reused with a different secret set.</td><td>Fix instance-key reuse.</td></tr>
+        <tr><td><code>415</code></td><td>The POST is missing <code>Content-Type: application/json</code>.</td><td>Fix the request headers.</td></tr>
+        <tr><td><code>500</code></td><td>LockGate could not complete the operation.</td><td>Fail startup and inspect LockGate health/logs.</td></tr>
       </tbody></table></div>
     </section>
 
@@ -312,7 +362,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, ide
         <li>Use HTTPS whenever LockGate is reached across a network.</li>
         <li>Set a startup timeout. The application must not silently continue when protected secrets are unavailable.</li>
         <li>Never log application tokens, secret responses, decrypted values, or request bodies containing secrets.</li>
-        <li>Request only the paths the process needs. LockGate rejects paths outside the configured application boundary.</li>
+        <li>Assign only the secret bundles the application needs. Token-only clients cannot expand their server-side boundary.</li>
         <li>Revocation blocks future retrieval. It cannot remove secrets already delivered into an application's memory.</li>
       </ul>
     </section>

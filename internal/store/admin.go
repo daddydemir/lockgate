@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
-	"lockgate/internal/secure"
+	"github.com/daddydemir/lockgate/internal/secure"
 	"time"
 )
 

@@ -1,0 +1,22 @@
+{
+  "name": "lockgate-client",
+  "version": "0.1.0",
+  "description": "Small, dependency-free Node.js client for LockGate secret approval",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "types": "./index.d.ts",
+  "files": ["index.js", "index.d.ts", "README.md"],
+  "engines": {"node": ">=18"},
+  "scripts": {"test": "node --test"},
+  "keywords": ["secrets", "configuration", "approval", "lockgate"],
+  "repository": {"type": "git", "url": "git+https://github.com/daddydemir/lockgate.git", "directory": "sdk/javascript"},
+  "homepage": "https://github.com/daddydemir/lockgate#readme",
+  "bugs": {"url": "https://github.com/daddydemir/lockgate/issues"},
+  "license": "MIT",
+  "publishConfig": {"access": "public"}
+}

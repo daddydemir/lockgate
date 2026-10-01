@@ -100,7 +100,11 @@ Set `LOCKGATE_ORIGIN=https://lockgate.internal` and **remove** `LOCKGATE_INSECUR
 
 ## Language support and optional Go helper
 
-LockGate is language independent. Applications use its JSON/HTTP API, so JavaScript, Python, PHP, Java, Rust, Go, and any environment with an HTTP client can request secrets. The authenticated `/admin/docs` screen contains curl, JavaScript, and Python examples.
+LockGate is language independent. Applications use its JSON/HTTP API, so JavaScript, Python, PHP, Java, Rust, Go, and any environment with an HTTP client can request secrets. The authenticated `/admin/docs` screen contains a language-independent protocol contract, full error/status reference, curl flow, and copy-ready language examples.
+
+Ready-to-copy clients are included for [Node.js](web/static/examples/lockgate.mjs), [Python](web/static/examples/lockgate.py), and [Go](pkg/client/client.go). The Node.js client has no npm dependencies; the Python client uses only the standard library. All three implement the same token-only request, idempotency key, approval polling, server-advised retry interval, startup/request timeouts, redirect protection, response validation, revocation handling, and fail-closed behavior. These files are also downloadable from the in-app documentation.
+
+The admin UI is responsive and installable as a PWA from supported mobile and desktop browsers. PWA installation requires HTTPS outside local development. Its service worker caches only versioned static assets; authenticated HTML, API responses, tokens, and decrypted secret values are never stored for offline access. When disconnected, the installed app shows a connection-required screen.
 
 There is no published `lockgate` Go package. This source tree includes a small optional helper in `pkg/client`; the module path `lockgate` is local to this project. To use that helper from a different repository, first publish or fork the module under a real repository import path, copy the helper into your project, or use a local `replace` directive during development.
 

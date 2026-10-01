@@ -1,4 +1,4 @@
-module lockgate
+module github.com/daddydemir/lockgate
 
 go 1.26.0
 

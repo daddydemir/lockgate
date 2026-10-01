@@ -1,4 +1,7 @@
 'use strict';
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => navigator.serviceWorker.register(document.body.dataset.serviceWorker, {scope: '/'}).catch(() => {}));
+}
 document.querySelectorAll('[data-confirm]').forEach(form => form.addEventListener('submit', event => {
   if (!window.confirm(form.dataset.confirm)) event.preventDefault();
 }));
@@ -221,3 +224,11 @@ document.querySelectorAll('[data-code-tabs]').forEach(tabs => {
     });
   });
 });
+document.querySelectorAll('[data-open-code-tab]').forEach(link => link.addEventListener('click', event => {
+  const button = document.getElementById(link.dataset.openCodeTab);
+  if (!button) return;
+  event.preventDefault();
+  button.click();
+  document.getElementById('languages')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+  button.focus();
+}));

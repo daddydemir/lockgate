@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"lockgate/internal/store"
+	"github.com/daddydemir/lockgate/internal/store"
 	"net/http"
 	"strconv"
 	"strings"
