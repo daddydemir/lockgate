@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
 	"github.com/daddydemir/lockgate/internal/testutil"
 	lockgate "github.com/daddydemir/lockgate/pkg/client"
@@ -31,7 +32,9 @@ func TestHTTPWorkflow(t *testing.T) {
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 		for _, c := range cookies {
-			r.AddCookie(c)
+			if c != nil {
+				r.AddCookie(c)
+			}
 		}
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
@@ -65,6 +68,28 @@ func TestHTTPWorkflow(t *testing.T) {
 	session, e := db.Session(ctx, cookie.Value)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if w := do("POST", "/admin/security", url.Values{"csrf": {session.CSRF}, "action": {"start-mfa"}}, cookie); w.Code != http.StatusSeeOther {
+		t.Fatal("could not start MFA setup", w.Code, w.Body.String())
+	}
+	settings, e := db.MFA(ctx, session.AdminID)
+	if e != nil || settings.Secret == "" {
+		t.Fatal("missing MFA setup secret", e)
+	}
+	qr := do("GET", "/admin/security/totp/qr", nil, cookie)
+	if qr.Code != 200 || qr.Header().Get("Content-Type") != "image/png" || len(qr.Body.Bytes()) < 100 {
+		t.Fatal("invalid MFA QR response", qr.Code, qr.Header())
+	}
+	code := secure.TOTPCode(settings.Secret, time.Now())
+	if w := do("POST", "/admin/security", url.Values{"csrf": {session.CSRF}, "action": {"enable-mfa"}, "code": {code}}, cookie); w.Code != http.StatusSeeOther {
+		t.Fatal("could not enable MFA", w.Code, w.Body.String())
+	}
+	securityPage := do("GET", "/admin/security", nil, cookie)
+	if securityPage.Code != 200 || !strings.Contains(securityPage.Body.String(), "Authenticator protection is active") {
+		t.Fatal("MFA enabled state missing")
+	}
+	if w := do("POST", "/admin/security", url.Values{"csrf": {session.CSRF}, "action": {"disable-mfa"}, "code": {code}}, cookie); w.Code != http.StatusSeeOther {
+		t.Fatal("could not disable MFA", w.Code, w.Body.String())
 	}
 	t.Run("CSRF and origin rejected", func(t *testing.T) {
 		for _, origin := range []string{"https://evil.test", ""} {
@@ -119,7 +144,7 @@ func TestHTTPWorkflow(t *testing.T) {
 	if e = json.Unmarshal(req.Body.Bytes(), &access); e != nil {
 		t.Fatal(e)
 	}
-	for _, p := range []string{"/admin", "/admin/applications", "/admin/applications/" + jsonNumber(id), "/admin/secrets", "/admin/secret?path=projects/test/db", "/admin/approvals", "/admin/audit", "/admin/docs"} {
+	for _, p := range []string{"/admin", "/admin/applications", "/admin/applications/" + jsonNumber(id), "/admin/secrets", "/admin/secret?path=projects/test/db", "/admin/approvals", "/admin/audit", "/admin/security", "/admin/docs"} {
 		w := do("GET", p, nil, cookie)
 		if w.Code != 200 {
 			t.Fatalf("%s: %d %s", p, w.Code, w.Body.String())
@@ -188,7 +213,7 @@ func TestSSE(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	token, e := db.Login(context.Background(), "admin", "test-password-at-least-12", "")
+	token, e := db.Login(context.Background(), "admin", "test-password-at-least-12", "", "")
 	if e != nil {
 		t.Fatal(e)
 	}

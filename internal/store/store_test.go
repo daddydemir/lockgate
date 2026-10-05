@@ -5,11 +5,55 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
 	"github.com/daddydemir/lockgate/internal/testutil"
 	"sync"
 	"testing"
+	"time"
 )
+
+func TestAdminMFA(t *testing.T) {
+	s := testutil.Store(t)
+	ctx := context.Background()
+	if _, err := s.Login(ctx, "admin", "test-password-at-least-12", "", ""); err != nil {
+		t.Fatal("login should work before MFA", err)
+	}
+	if err := s.BeginMFA(ctx, 1, "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := s.MFA(ctx, 1)
+	if err != nil || settings.Enabled || len(settings.Secret) != 32 {
+		t.Fatal("invalid pending MFA settings", settings, err)
+	}
+	var ciphertext []byte
+	if err = s.DB.QueryRow(ctx, `SELECT totp_ciphertext FROM admins WHERE id=1`).Scan(&ciphertext); err != nil || bytes.Contains(ciphertext, []byte(settings.Secret)) {
+		t.Fatal("TOTP secret stored as plaintext", err)
+	}
+	if err = s.SetMFA(ctx, 1, "000000", true, ""); !errors.Is(err, store.ErrMFARequired) {
+		t.Fatal("invalid setup code accepted", err)
+	}
+	code := secure.TOTPCode(settings.Secret, time.Now())
+	if err = s.SetMFA(ctx, 1, code, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = s.MFA(ctx, 1)
+	if err != nil || !settings.Enabled || settings.Secret != "" {
+		t.Fatal("enabled MFA exposed setup secret", settings, err)
+	}
+	if _, err = s.Login(ctx, "admin", "test-password-at-least-12", "", ""); !errors.Is(err, store.ErrUnauthorized) {
+		t.Fatal("MFA login without code accepted", err)
+	}
+	if _, err = s.Login(ctx, "admin", "test-password-at-least-12", code, ""); err != nil {
+		t.Fatal("valid MFA login rejected", err)
+	}
+	if err = s.SetMFA(ctx, 1, code, false, ""); err != nil {
+		t.Fatal("could not disable MFA", err)
+	}
+	if _, err = s.Login(ctx, "admin", "test-password-at-least-12", "", ""); err != nil {
+		t.Fatal("password login did not return after disabling MFA", err)
+	}
+}
 
 func TestTokenResolvesConfiguredSecrets(t *testing.T) {
 	s := testutil.Store(t)

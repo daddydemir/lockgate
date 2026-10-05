@@ -46,7 +46,9 @@ type attempt struct {
 type sessionKey struct{}
 type Page struct {
 	Archived                                                           bool
+	MFAEnabled, MFASetup                                               bool
 	Title, Section, CSRF, Username, Error, Notice, Token, Path, Values string
+	MFASecret                                                          string
 	PublicURL                                                          string
 	Application                                                        store.Application
 	Applications                                                       []store.Application
@@ -148,6 +150,9 @@ func (s *Server) routes() {
 	s.admin("GET /admin/approvals", s.approvals)
 	s.admin("POST /admin/approvals/{id}", s.resolve)
 	s.admin("GET /admin/audit", s.audit)
+	s.admin("GET /admin/security", s.security)
+	s.admin("POST /admin/security", s.changeSecurity)
+	s.admin("GET /admin/security/totp/qr", s.totpQR)
 	s.admin("GET /admin/docs", s.docs)
 	s.admin("GET /admin/events", s.events)
 }
@@ -354,15 +359,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Login busy. Try again shortly.", 429)
 		return
 	}
-	username, password := r.PostForm.Get("username"), r.PostForm.Get("password")
+	username, password, otp := r.PostForm.Get("username"), r.PostForm.Get("password"), strings.TrimSpace(r.PostForm.Get("otp"))
 	if len(username) > 100 || len(password) > 1024 {
 		s.fail(w, r, store.ErrInvalid)
 		return
 	}
-	t, e := s.Store.Login(r.Context(), username, password, ip(r))
+	t, e := s.Store.Login(r.Context(), username, password, otp, ip(r))
 	if e != nil {
-		if errors.Is(e, store.ErrUnauthorized) {
-			s.render(w, r, "login", Page{Title: "Welcome back", CSRF: c.Value, Error: "Username or password is incorrect."})
+		if errors.Is(e, store.ErrUnauthorized) || errors.Is(e, store.ErrMFARequired) {
+			s.render(w, r, "login", Page{Title: "Welcome back", CSRF: c.Value, Error: "Username, password, or authenticator code is incorrect."})
 			return
 		}
 		s.fail(w, r, e)

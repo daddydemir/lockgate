@@ -96,7 +96,7 @@ Set `LOCKGATE_ORIGIN=https://lockgate.internal` and **remove** `LOCKGATE_INSECUR
 | `LOCKGATE_ADMIN_PASSWORD_FILE` | Password file consumed only by `admin-create`. |
 | `LOCKGATE_TEST_DATABASE_URL` | Disposable database for integration tests. |
 
-`GET /healthz` checks database connectivity. SIGINT/SIGTERM triggers graceful shutdown. No request bodies or credentials are logged. Audit IPs use the direct TCP peer: forwarded headers are deliberately not trusted. Behind a reverse proxy, IP audit entries and login rate limits therefore use the proxy address. Login is limited to 10 attempts per peer per 10 minutes, with at most two simultaneous Argon2id calculations. For public exposure, add a proxy-level login limit using your trusted proxy configuration. Admin sessions expire after 12 hours and are stored hashed in PostgreSQL.
+`GET /healthz` checks database connectivity. SIGINT/SIGTERM triggers graceful shutdown. No request bodies or credentials are logged. Audit IPs use the direct TCP peer: forwarded headers are deliberately not trusted. Behind a reverse proxy, IP audit entries and login rate limits therefore use the proxy address. Login is limited to 10 attempts per peer per 10 minutes, with at most two simultaneous Argon2id calculations. For public exposure, add a proxy-level login limit using your trusted proxy configuration. Admin sessions expire after 12 hours and are stored hashed in PostgreSQL. Each admin can enable or disable TOTP two-factor authentication under **Security**. Setup provides a QR code and manual key; the TOTP secret is envelope-encrypted with the LockGate master key and is never stored as plaintext.
 
 ## Language support and optional Go helper
 
@@ -187,7 +187,7 @@ export LOCKGATE_TEST_DATABASE_URL='postgres://lockgate:password@127.0.0.1:5432/l
 make integration
 ```
 
-Integration tests exercise 24 simultaneous startups, shared approvals with different path sets, instance deduplication, database uniqueness constraints, approval/denial, restart grants, revocation under load, token rotation, disabled applications, cross-application polling rejection, changed path boundaries, concurrent secret versions, immutable versions, restore, real HTTP login/CSRF/cookie flags, UI rendering, machine/session auth separation, SSE, and the Go client. Unit tests cover encryption tampering/context binding, tokens/passwords, path boundaries, client denial/cancellation/network failure, and redirect protection.
+Integration tests exercise 24 simultaneous startups, shared approvals with different path sets, instance deduplication, database uniqueness constraints, approval/denial, restart grants, revocation under load, token rotation, disabled applications, cross-application polling rejection, changed path boundaries, concurrent secret versions, immutable versions, restore, real HTTP login/CSRF/cookie flags, encrypted TOTP setup/QR/login/disable flows, UI rendering, machine/session auth separation, SSE, and the Go client. Unit tests cover encryption tampering/context binding, tokens/passwords, RFC 6238 TOTP vectors, path boundaries, client denial/cancellation/network failure, and redirect protection.
 
 ## Layout
 

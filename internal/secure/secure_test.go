@@ -6,7 +6,27 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestTOTP(t *testing.T) {
+	// RFC 6238 SHA-1 test secret. The RFC's 8-digit value at 59 seconds is
+	// 94287082, so the six-digit form is 287082.
+	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	if !VerifyTOTP(secret, "287082", time.Unix(59, 0)) {
+		t.Fatal("valid TOTP rejected")
+	}
+	if got := TOTPCode(secret, time.Unix(59, 0)); got != "287082" {
+		t.Fatal("unexpected TOTP", got)
+	}
+	if VerifyTOTP(secret, "287083", time.Unix(59, 0)) || VerifyTOTP(secret, "abc", time.Unix(59, 0)) {
+		t.Fatal("invalid TOTP accepted")
+	}
+	generated := TOTPSecret()
+	if len(generated) != 32 {
+		t.Fatal("unexpected generated secret length")
+	}
+}
 
 func TestEnvelope(t *testing.T) {
 	k := &FileKey{key: bytes.Repeat([]byte{1}, 32)}

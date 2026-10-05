@@ -5,11 +5,68 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/daddydemir/lockgate/internal/store"
+	"github.com/skip2/go-qrcode"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+func (s *Server) security(w http.ResponseWriter, r *http.Request) {
+	settings, e := s.Store.MFA(r.Context(), session(r).AdminID)
+	if e != nil {
+		s.fail(w, r, e)
+		return
+	}
+	s.render(w, r, "security", Page{Title: "Security", MFAEnabled: settings.Enabled, MFASetup: settings.Secret != "", MFASecret: settings.Secret})
+}
+
+func (s *Server) changeSecurity(w http.ResponseWriter, r *http.Request) {
+	action := r.PostForm.Get("action")
+	var e error
+	switch action {
+	case "start-mfa":
+		e = s.Store.BeginMFA(r.Context(), session(r).AdminID, ip(r))
+	case "enable-mfa":
+		e = s.Store.SetMFA(r.Context(), session(r).AdminID, strings.TrimSpace(r.PostForm.Get("code")), true, ip(r))
+	case "disable-mfa":
+		e = s.Store.SetMFA(r.Context(), session(r).AdminID, strings.TrimSpace(r.PostForm.Get("code")), false, ip(r))
+	default:
+		e = store.ErrInvalid
+	}
+	if e != nil {
+		settings, readErr := s.Store.MFA(r.Context(), session(r).AdminID)
+		if readErr != nil {
+			s.fail(w, r, readErr)
+			return
+		}
+		message := "Could not update authenticator settings."
+		if e == store.ErrMFARequired {
+			message = "The authenticator code is invalid or expired."
+		}
+		s.render(w, r, "security", Page{Title: "Security", Error: message, MFAEnabled: settings.Enabled, MFASetup: settings.Secret != "", MFASecret: settings.Secret})
+		return
+	}
+	http.Redirect(w, r, "/admin/security", http.StatusSeeOther)
+}
+
+func (s *Server) totpQR(w http.ResponseWriter, r *http.Request) {
+	settings, e := s.Store.MFA(r.Context(), session(r).AdminID)
+	if e != nil || settings.Enabled || settings.Secret == "" {
+		http.NotFound(w, r)
+		return
+	}
+	account := session(r).Username
+	otpauth := "otpauth://totp/" + url.PathEscape("LockGate:"+account) + "?secret=" + url.QueryEscape(settings.Secret) + "&issuer=LockGate&algorithm=SHA1&digits=6&period=30"
+	png, e := qrcode.Encode(otpauth, qrcode.Medium, 256)
+	if e != nil {
+		s.fail(w, r, e)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(png)
+}
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	counts, e := s.Store.Counts(r.Context())

@@ -2,8 +2,9 @@ package store
 
 import (
 	"context"
-	"github.com/jackc/pgx/v5"
+	"fmt"
 	"github.com/daddydemir/lockgate/internal/secure"
+	"github.com/jackc/pgx/v5"
 	"time"
 )
 
@@ -21,10 +22,12 @@ func (s *Store) CreateAdmin(ctx context.Context, username, password string) erro
 	_, e := s.DB.Exec(ctx, `INSERT INTO admins(username,password_hash) VALUES($1,$2)`, username, hash)
 	return e
 }
-func (s *Store) Login(ctx context.Context, username, password, ip string) (string, error) {
+func (s *Store) Login(ctx context.Context, username, password, otp, ip string) (string, error) {
 	var id int64
 	var hash string
-	e := s.DB.QueryRow(ctx, `SELECT id,password_hash FROM admins WHERE username=$1`, username).Scan(&id, &hash)
+	var enabled bool
+	var env secure.Envelope
+	e := s.DB.QueryRow(ctx, `SELECT id,password_hash,totp_enabled,COALESCE(totp_ciphertext,''::bytea),COALESCE(totp_nonce,''::bytea),COALESCE(totp_encrypted_dek,''::bytea),COALESCE(totp_algorithm,''),COALESCE(totp_key_version,'') FROM admins WHERE username=$1`, username).Scan(&id, &hash, &enabled, &env.Ciphertext, &env.Nonce, &env.EncryptedDEK, &env.Algorithm, &env.KeyVersion)
 	if e != nil && e != pgx.ErrNoRows {
 		return "", e
 	}
@@ -33,6 +36,11 @@ func (s *Store) Login(ctx context.Context, username, password, ip string) (strin
 		hash = "$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	}
 	valid := secure.VerifyPassword(password, hash)
+	if valid && id != 0 && enabled {
+		secret, openErr := secure.Open(s.Keys, env, fmt.Sprintf("admin-totp:%d", id), 1)
+		valid = openErr == nil && secure.VerifyTOTP(string(secret), otp, time.Now())
+		clear(secret)
+	}
 	if !valid || id == 0 {
 		if e = s.Audit(ctx, "LOGIN_FAILED", "anonymous", ip); e != nil {
 			return "", e
@@ -55,6 +63,94 @@ func (s *Store) Login(ctx context.Context, username, password, ip string) (strin
 		return "", e
 	}
 	return token, tx.Commit(ctx)
+}
+
+type MFASettings struct {
+	Enabled bool
+	Secret  string
+}
+
+func (s *Store) MFA(ctx context.Context, admin int64) (MFASettings, error) {
+	var out MFASettings
+	var env secure.Envelope
+	e := s.DB.QueryRow(ctx, `SELECT totp_enabled,COALESCE(totp_ciphertext,''::bytea),COALESCE(totp_nonce,''::bytea),COALESCE(totp_encrypted_dek,''::bytea),COALESCE(totp_algorithm,''),COALESCE(totp_key_version,'') FROM admins WHERE id=$1`, admin).Scan(&out.Enabled, &env.Ciphertext, &env.Nonce, &env.EncryptedDEK, &env.Algorithm, &env.KeyVersion)
+	if e != nil {
+		return out, e
+	}
+	if !out.Enabled && len(env.Ciphertext) > 0 {
+		plain, err := secure.Open(s.Keys, env, fmt.Sprintf("admin-totp:%d", admin), 1)
+		if err != nil {
+			return out, err
+		}
+		out.Secret = string(plain)
+		clear(plain)
+	}
+	return out, nil
+}
+
+func (s *Store) BeginMFA(ctx context.Context, admin int64, ip string) error {
+	secret := secure.TOTPSecret()
+	defer func() { secret = "" }()
+	env, e := secure.Seal(s.Keys, []byte(secret), fmt.Sprintf("admin-totp:%d", admin), 1)
+	if e != nil {
+		return e
+	}
+	tx, e := s.DB.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	result, e := tx.Exec(ctx, `UPDATE admins SET totp_enabled=false,totp_ciphertext=$2,totp_nonce=$3,totp_encrypted_dek=$4,totp_algorithm=$5,totp_key_version=$6 WHERE id=$1 AND NOT totp_enabled`, admin, env.Ciphertext, env.Nonce, env.EncryptedDEK, env.Algorithm, env.KeyVersion)
+	if e != nil {
+		return e
+	}
+	if result.RowsAffected() != 1 {
+		return ErrConflict
+	}
+	if e = audit(ctx, tx, "MFA_SETUP_STARTED", AdminActor(admin), nil, "", ip); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) SetMFA(ctx context.Context, admin int64, code string, enable bool, ip string) error {
+	tx, e := s.DB.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	var current bool
+	var env secure.Envelope
+	e = tx.QueryRow(ctx, `SELECT totp_enabled,COALESCE(totp_ciphertext,''::bytea),COALESCE(totp_nonce,''::bytea),COALESCE(totp_encrypted_dek,''::bytea),COALESCE(totp_algorithm,''),COALESCE(totp_key_version,'') FROM admins WHERE id=$1 FOR UPDATE`, admin).Scan(&current, &env.Ciphertext, &env.Nonce, &env.EncryptedDEK, &env.Algorithm, &env.KeyVersion)
+	if e != nil {
+		return e
+	}
+	if current == enable || len(env.Ciphertext) == 0 {
+		return ErrConflict
+	}
+	plain, e := secure.Open(s.Keys, env, fmt.Sprintf("admin-totp:%d", admin), 1)
+	if e != nil {
+		return e
+	}
+	valid := secure.VerifyTOTP(string(plain), code, time.Now())
+	clear(plain)
+	if !valid {
+		return ErrMFARequired
+	}
+	event := "MFA_ENABLED"
+	if enable {
+		_, e = tx.Exec(ctx, `UPDATE admins SET totp_enabled=true WHERE id=$1`, admin)
+	} else {
+		event = "MFA_DISABLED"
+		_, e = tx.Exec(ctx, `UPDATE admins SET totp_enabled=false,totp_ciphertext=NULL,totp_nonce=NULL,totp_encrypted_dek=NULL,totp_algorithm=NULL,totp_key_version=NULL WHERE id=$1`, admin)
+	}
+	if e != nil {
+		return e
+	}
+	if e = audit(ctx, tx, event, AdminActor(admin), nil, "", ip); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 func (s *Store) Session(ctx context.Context, token string) (Session, error) {
 	var a Session

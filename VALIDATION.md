@@ -107,3 +107,10 @@ Tests used disposable credentials and isolated schemas. The initial validation d
 - Added `make sdk-test` to verify Go, Node.js, Python, redirect protection, approval polling, and exact synchronization between package sources and in-app downloadable clients.
 - npm pack and Python wheel builds passed. Clean consumer projects imported the npm tarball, Python wheel, and Go module path successfully. Package artifacts and checksums are stored under `dist/sdk`.
 - Published version `0.1.0` as `lockgate-client` on npm and PyPI, and tagged the Go module as `v0.1.0`. Clean registry installs and a Go proxy import/build passed.
+
+## Authenticator MFA
+
+- Added optional per-admin RFC 6238 TOTP with QR and manual-key setup, confirmation before activation, and code-confirmed disabling.
+- TOTP seeds use envelope encryption with the master key; PostgreSQL stores ciphertext, nonce, wrapped DEK, algorithm, and key version only.
+- Login accepts an authenticator code only when MFA is enabled and keeps the same error for invalid username, password, or code.
+- RFC vectors, wrong-code rejection, encrypted-at-rest checks, QR authentication/content type, CSRF, enable/disable, and real PostgreSQL login behavior passed under the race detector.

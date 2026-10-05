@@ -4,10 +4,9 @@ package testutil
 import (
 	"context"
 	"encoding/base64"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
-	"net/url"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,13 +30,11 @@ func Store(t *testing.T) *store.Store {
 		db.Close()
 		t.Fatal(e)
 	}
-	u, e := url.Parse(dsn)
+	config, e := pgxpool.ParseConfig(dsn)
 	if e != nil {
 		t.Fatal(e)
 	}
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
+	config.ConnConfig.RuntimeParams["search_path"] = schema
 	file := filepath.Join(t.TempDir(), "master.key")
 	if e = os.WriteFile(file, []byte(base64.StdEncoding.EncodeToString(make([]byte, 32))), 0600); e != nil {
 		t.Fatal(e)
@@ -46,10 +43,11 @@ func Store(t *testing.T) *store.Store {
 	if e != nil {
 		t.Fatal(e)
 	}
-	s, e := store.New(ctx, u.String(), keys)
+	schemaDB, e := pgxpool.NewWithConfig(ctx, config)
 	if e != nil {
 		t.Fatal(e)
 	}
+	s := &store.Store{DB: schemaDB, Keys: keys}
 	t.Cleanup(func() {
 		s.DB.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

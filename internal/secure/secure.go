@@ -4,15 +4,19 @@ package secure
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -28,6 +32,53 @@ func Token() string        { return "lg_app_" + Random(32) }
 func Hash(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
 func VerifyToken(token string, hash []byte) bool {
 	return strings.HasPrefix(token, "lg_app_") && subtle.ConstantTimeCompare(Hash(token), hash) == 1
+}
+
+// TOTPSecret returns a 160-bit RFC 6238 secret suitable for manual entry or QR setup.
+func TOTPSecret() string {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+}
+
+// VerifyTOTP accepts the current 30-second code and one adjacent time step for clock skew.
+func VerifyTOTP(secret, code string, now time.Time) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	for offset := int64(-1); offset <= 1; offset++ {
+		expected := TOTPCode(secret, now.Add(time.Duration(offset)*30*time.Second))
+		if subtle.ConstantTimeCompare([]byte(code), []byte(expected)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func TOTPCode(secret string, now time.Time) string {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.TrimSpace(secret)))
+	if err != nil || len(key) < 16 {
+		return ""
+	}
+	var counter [8]byte
+	v := uint64(now.Unix() / 30)
+	for i := 7; i >= 0; i-- {
+		counter[i] = byte(v)
+		v >>= 8
+	}
+	mac := hmac.New(sha1.New, key)
+	_, _ = mac.Write(counter[:])
+	digest := mac.Sum(nil)
+	i := digest[len(digest)-1] & 15
+	n := (uint32(digest[i])&127)<<24 | uint32(digest[i+1])<<16 | uint32(digest[i+2])<<8 | uint32(digest[i+3])
+	return fmt.Sprintf("%06d", n%1000000)
 }
 func Password(password string) string {
 	salt := make([]byte, 16)

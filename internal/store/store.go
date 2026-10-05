@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/migrations"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
@@ -20,6 +20,7 @@ var (
 	ErrNotFound     = errors.New("record not found")
 	ErrInvalid      = errors.New("invalid input")
 	ErrConflict     = errors.New("record already exists or has changed")
+	ErrMFARequired  = errors.New("authenticator code required or invalid")
 )
 
 type Store struct {
