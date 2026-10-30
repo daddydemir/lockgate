@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/server"
 	"github.com/daddydemir/lockgate/internal/store"
 )
@@ -37,7 +36,7 @@ func run() error {
 		command = os.Args[1]
 	}
 	if command == "help" || command == "--help" {
-		fmt.Println("LockGate\n\n  serve             Start HTTP server (applies migrations)\n  migrate           Apply PostgreSQL migrations\n  keygen FILE       Generate master key file (never overwrites)\n  admin-create USER  Create admin; password read from LOCKGATE_ADMIN_PASSWORD_FILE\n\nRequired: POSTGRE_DSN (or DATABASE_URL); serve also requires LOCKGATE_MASTER_KEY_FILE.\nSee README.md for deployment configuration.")
+		fmt.Println("LockGate\n\n  serve                 Start HTTP server (applies migrations and initializes the DB key)\n  migrate               Apply PostgreSQL migrations\n  key-import FILE       One-time import of the previous file-backed master key\n  keygen FILE           Generate a legacy master key file (never overwrites)\n  admin-create USER      Create admin; password read from LOCKGATE_ADMIN_PASSWORD_FILE\n\nRequired: POSTGRE_DSN (or DATABASE_URL). See README.md for deployment configuration.")
 		return nil
 	}
 	if command == "keygen" {
@@ -61,23 +60,19 @@ func run() error {
 		fmt.Println("Master key file created. Back it up separately from the database.")
 		return nil
 	}
-	if command != "serve" && command != "migrate" && command != "admin-create" {
+	if command != "serve" && command != "migrate" && command != "admin-create" && command != "key-import" {
 		return errors.New("unknown command; use lockgate help")
+	}
+	if command == "key-import" && len(os.Args) != 3 {
+		return errors.New("usage: lockgate key-import FILE")
 	}
 	url := env("POSTGRE_DSN", os.Getenv("DATABASE_URL"))
 	if url == "" {
 		return errors.New("POSTGRE_DSN or DATABASE_URL is required")
 	}
-	var keys secure.KeyProvider
-	if command == "serve" {
-		k, e := secure.LoadFile(env("LOCKGATE_MASTER_KEY_FILE", "/run/secrets/lockgate-master-key"))
-		if e != nil {
-			return e
-		}
-		keys = k
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	s, e := store.New(ctx, url, keys)
+	defer cancel()
+	s, e := store.New(ctx, url, nil)
 	if e != nil {
 		cancel()
 		return errors.New("cannot connect to PostgreSQL; check POSTGRE_DSN / DATABASE_URL and database availability")
@@ -87,9 +82,15 @@ func run() error {
 		cancel()
 		return errors.New("database migration failed; check database permissions and schema")
 	}
-	cancel()
 	if command == "migrate" {
 		fmt.Println("Migrations applied.")
+		return nil
+	}
+	if command == "key-import" {
+		if _, e = s.InitializeMasterKey(ctx, os.Args[2]); e != nil {
+			return e
+		}
+		fmt.Println("Database master key is initialized. An existing database key was not overwritten.")
 		return nil
 	}
 	if command == "admin-create" {
@@ -114,6 +115,12 @@ func run() error {
 		fmt.Println("Admin created.")
 		return nil
 	}
+	keys, e := s.InitializeMasterKey(ctx, "")
+	if e != nil {
+		return e
+	}
+	s.Keys = keys
+	cancel()
 	handler, e := server.New(s, server.Config{Origin: env("LOCKGATE_ORIGIN", "https://localhost:8080"), SecureCookies: os.Getenv("LOCKGATE_INSECURE_DEV_COOKIES") != "true"})
 	if e != nil {
 		return e

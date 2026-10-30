@@ -3,15 +3,114 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
 	"github.com/daddydemir/lockgate/internal/testutil"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestDatabaseMasterKeyPersistenceAndBootstrapSafety(t *testing.T) {
+	s := testutil.Store(t)
+	ctx := context.Background()
+	key := bytes.Repeat([]byte{0x5a}, 32)
+	path := filepath.Join(t.TempDir(), "legacy-master.key")
+	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(key)+"\n"), 0600); err != nil {
+		t.Fatal("write test bootstrap key", err)
+	}
+	if _, err := s.DB.Exec(ctx, `DELETE FROM lockgate_master_key`); err != nil {
+		t.Fatal("clear test key", err)
+	}
+	const starters = 8
+	providers := make([]secure.KeyProvider, starters)
+	errs := make([]error, starters)
+	var wg sync.WaitGroup
+	for i := 0; i < starters; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			providers[i], errs[i] = s.InitializeMasterKey(ctx, "")
+		}(i)
+	}
+	wg.Wait()
+	var sharedVersion string
+	var sharedKey []byte
+	for i, provider := range providers {
+		if errs[i] != nil {
+			t.Fatalf("concurrent key initialization %d: %v", i, errs[i])
+		}
+		version, current, err := provider.Current()
+		if err != nil {
+			t.Fatal("read generated key", err)
+		}
+		if i == 0 {
+			sharedVersion, sharedKey = version, current
+		} else {
+			if version != sharedVersion || !bytes.Equal(current, sharedKey) {
+				t.Fatal("concurrent starters loaded different master keys")
+			}
+			clear(current)
+		}
+	}
+	clear(sharedKey)
+	var keyRows int
+	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM lockgate_master_key`).Scan(&keyRows); err != nil || keyRows != 1 {
+		t.Fatal("expected one persisted master key", err)
+	}
+	if _, err := s.DB.Exec(ctx, `DELETE FROM lockgate_master_key`); err != nil {
+		t.Fatal("clear generated test key", err)
+	}
+	provider, err := s.InitializeMasterKey(ctx, path)
+	if err != nil {
+		t.Fatal("import bootstrap key", err)
+	}
+	s.Keys = provider
+	adminID := testAdminID(t, s, ctx)
+	values := map[string]string{"DB_PASSWORD": "test-value"}
+	if _, err = s.SaveSecret(ctx, "projects/key-test/database", values, adminID, ""); err != nil {
+		t.Fatal("save encrypted test secret", err)
+	}
+
+	provider, err = s.InitializeMasterKey(ctx, "")
+	if err != nil {
+		t.Fatal("reload database key", err)
+	}
+	s.Keys = provider
+	got, err := s.ReadSecret(ctx, "projects/key-test/database", adminID, "")
+	if err != nil || got["DB_PASSWORD"] != values["DB_PASSWORD"] {
+		t.Fatal("database key did not decrypt the existing version", err)
+	}
+
+	if _, err = s.DB.Exec(ctx, `DELETE FROM lockgate_master_key`); err != nil {
+		t.Fatal("remove test key", err)
+	}
+	if _, err = s.InitializeMasterKey(ctx, ""); err == nil {
+		t.Fatal("generated a replacement key while encrypted data exists")
+	}
+	provider, err = s.InitializeMasterKey(ctx, path)
+	if err != nil {
+		t.Fatal("restored key import failed", err)
+	}
+	s.Keys = provider
+	if _, err = s.ReadSecret(ctx, "projects/key-test/database", adminID, ""); err != nil {
+		t.Fatal("imported key did not recover encrypted data", err)
+	}
+}
+
+func testAdminID(t *testing.T, s *store.Store, ctx context.Context) int64 {
+	t.Helper()
+	var id int64
+	if err := s.DB.QueryRow(ctx, `SELECT id FROM admins WHERE username='admin'`).Scan(&id); err != nil {
+		t.Fatal("find test admin", err)
+	}
+	return id
+}
 
 func TestAdminMFA(t *testing.T) {
 	s := testutil.Store(t)

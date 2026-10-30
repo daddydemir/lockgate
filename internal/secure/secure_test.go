@@ -79,6 +79,28 @@ func TestEnvelope(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryKeyProviderCopiesAndVersions(t *testing.T) {
+	original := bytes.Repeat([]byte{9}, 32)
+	provider, err := NewMemoryKeyProvider("db-v1", map[string][]byte{"db-v1": original})
+	if err != nil {
+		t.Fatal("create key provider", err)
+	}
+	clear(original)
+	version, current, err := provider.Current()
+	if err != nil || version != "db-v1" || len(current) != 32 || bytes.Equal(current, make([]byte, 32)) {
+		t.Fatal("provider did not retain an independent key copy", err)
+	}
+	clear(current)
+	key, err := provider.Key("db-v1")
+	if err != nil || len(key) != 32 || bytes.Equal(key, make([]byte, 32)) {
+		t.Fatal("provider key lookup failed", err)
+	}
+	clear(key)
+	if _, err = provider.Key("file-v1"); err == nil {
+		t.Fatal("unknown key version accepted")
+	}
+}
 func TestTokens(t *testing.T) {
 	a, b := Token(), Token()
 	if a == b {

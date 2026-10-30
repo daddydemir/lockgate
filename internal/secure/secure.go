@@ -130,9 +130,56 @@ type KeyProvider interface {
 	Current() (string, []byte, error)
 	Key(version string) ([]byte, error)
 }
+
+// MemoryKeyProvider keeps database-loaded key material in memory for the life
+// of the process. The database is the durable source; callers should create
+// this only through the store's serialized initialization path.
+type MemoryKeyProvider struct {
+	current string
+	keys    map[string][]byte
+}
+
+func NewMemoryKeyProvider(current string, keys map[string][]byte) (*MemoryKeyProvider, error) {
+	if current == "" || len(keys[current]) != 32 {
+		return nil, errors.New("invalid master key material")
+	}
+	copyKeys := make(map[string][]byte, len(keys))
+	for version, key := range keys {
+		if version == "" || len(key) != 32 {
+			return nil, errors.New("invalid master key material")
+		}
+		copyKeys[version] = append([]byte(nil), key...)
+	}
+	return &MemoryKeyProvider{current: current, keys: copyKeys}, nil
+}
+
+func (k *MemoryKeyProvider) Current() (string, []byte, error) {
+	return k.current, append([]byte(nil), k.keys[k.current]...), nil
+}
+
+func (k *MemoryKeyProvider) Key(version string) ([]byte, error) {
+	key, ok := k.keys[version]
+	if !ok {
+		return nil, errors.New("unknown master key version")
+	}
+	return append([]byte(nil), key...), nil
+}
+
+// GenerateKeyMaterial returns a random 256-bit key and never logs it.
+func GenerateKeyMaterial() ([]byte, error) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		clear(key)
+		return nil, errors.New("master key generation failed")
+	}
+	return key, nil
+}
+
 type FileKey struct{ key []byte }
 
-func LoadFile(path string) (*FileKey, error) {
+// LoadKeyMaterial reads a legacy key file for one-time migration into the
+// database. Normal server startup does not read this file.
+func LoadKeyMaterial(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, errors.New("cannot read master key file")
@@ -145,8 +192,18 @@ func LoadFile(path string) (*FileKey, error) {
 		return nil, errors.New("cannot read master key file")
 	}
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
+	clear(b)
 	if err != nil || len(key) != 32 {
+		clear(key)
 		return nil, errors.New("master key must be a base64 encoded 32-byte key")
+	}
+	return key, nil
+}
+
+func LoadFile(path string) (*FileKey, error) {
+	key, err := LoadKeyMaterial(path)
+	if err != nil {
+		return nil, err
 	}
 	return &FileKey{key: key}, nil
 }

@@ -3,12 +3,10 @@ package testutil
 
 import (
 	"context"
-	"encoding/base64"
 	"github.com/daddydemir/lockgate/internal/secure"
 	"github.com/daddydemir/lockgate/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -35,19 +33,11 @@ func Store(t *testing.T) *store.Store {
 		t.Fatal(e)
 	}
 	config.ConnConfig.RuntimeParams["search_path"] = schema
-	file := filepath.Join(t.TempDir(), "master.key")
-	if e = os.WriteFile(file, []byte(base64.StdEncoding.EncodeToString(make([]byte, 32))), 0600); e != nil {
-		t.Fatal(e)
-	}
-	keys, e := secure.LoadFile(file)
-	if e != nil {
-		t.Fatal(e)
-	}
 	schemaDB, e := pgxpool.NewWithConfig(ctx, config)
 	if e != nil {
 		t.Fatal(e)
 	}
-	s := &store.Store{DB: schemaDB, Keys: keys}
+	s := &store.Store{DB: schemaDB}
 	t.Cleanup(func() {
 		s.DB.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -64,6 +54,11 @@ func Store(t *testing.T) *store.Store {
 	if e = s.Migrate(ctx); e != nil {
 		t.Fatal("migration is not idempotent", e)
 	}
+	keys, e := s.InitializeMasterKey(ctx, "")
+	if e != nil {
+		t.Fatal("initialize database master key", e)
+	}
+	s.Keys = keys
 	if e = s.CreateAdmin(ctx, "admin", "test-password-at-least-12"); e != nil {
 		t.Fatal(e)
 	}

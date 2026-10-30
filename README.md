@@ -9,10 +9,7 @@ Requires Go 1.26+ and PostgreSQL 16+. Use a dedicated database and database role
 ```sh
 go mod download
 make build
-mkdir -p .local
-./bin/lockgate keygen .local/master.key
 export DATABASE_URL='postgres://lockgate:password@localhost:5432/lockgate?sslmode=disable'
-export LOCKGATE_MASTER_KEY_FILE="$PWD/.local/master.key"
 export LOCKGATE_ORIGIN='http://localhost:8080'
 export LOCKGATE_INSECURE_DEV_COOKIES=true
 ```
@@ -44,7 +41,7 @@ go run ./examples/startup
 
 ## Docker Compose with an existing PostgreSQL server
 
-The default `compose.yaml` starts only LockGate. It connects to the database specified by `POSTGRE_DSN`; it does not start PostgreSQL or Redis. Redis is not required for sessions, grants, or approval notifications.
+The default `compose.yaml` starts only LockGate. It connects to the database specified by `POSTGRE_DSN`; it does not start PostgreSQL or Redis. Redis is not required for sessions, grants, or approval notifications. On a new database, the first server start generates a random master key and stores it in PostgreSQL.
 
 ```sh
 cp .env.example .env
@@ -52,13 +49,19 @@ cp .env.example .env
 chmod 600 .env
 # Select an unused LOCKGATE_PORT and set LOCKGATE_ORIGIN to that exact address.
 docker compose build
-mkdir -p .local
-# Create the key before starting Compose; this never overwrites an existing key.
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/.local:/keys" lockgate:local keygen /keys/master.key
 ```
 
-Set `LOCKGATE_UID` and `LOCKGATE_GID` in `.env` to your host UID/GID so the unprivileged container can read the mode-0600 key. The PostgreSQL database must already exist; LockGate applies its embedded migrations automatically.
+The PostgreSQL database must already exist; LockGate applies its embedded migrations automatically and creates the master key in the database on a fresh install.
+
+For an existing file-backed installation, import the currently active key **before** starting the new server version. Build the new image, then run:
+
+```sh
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/.local/master.key:/run/lockgate/master.key:ro" \
+  lockgate key-import /run/lockgate/master.key
+```
+
+The import is write-once: if PostgreSQL already has a master key, it will be reused and the file will not replace it. After import, the running application reads only from PostgreSQL; the file is not mounted into the normal service. If the database contains encrypted data but no key and no import is performed, startup refuses to generate a replacement key.
 
 Create `.local/admin-password` using the password-file instructions above, then:
 
@@ -80,7 +83,7 @@ An application on LockGate's Compose network uses `LOCKGATE_URL=http://lockgate:
 
 ## Production / Linux / VPS
 
-Deploy `bin/lockgate`, PostgreSQL, a master key file, and a TLS reverse proxy. Example systemd and Nginx configuration lives in `deploy/`; these files are examples, not automatically installed. Run the binary as a dedicated unprivileged user. Make the master key readable only by that user (`0600` or `0400`).
+Deploy `bin/lockgate`, PostgreSQL, and a TLS reverse proxy. Example systemd and Nginx configuration lives in `deploy/`; these files are examples, not automatically installed. Run the binary as a dedicated unprivileged user. A fresh database receives a generated key at startup. For a file-backed upgrade, use `lockgate key-import FILE` once before starting the new server.
 
 Set `LOCKGATE_ORIGIN=https://lockgate.internal` and **remove** `LOCKGATE_INSECURE_DEV_COOKIES` (or set it to `false`). The app serves HTTP behind your TLS proxy. Production session cookies are `Secure`, `HttpOnly`, and `SameSite=Strict`; all browser mutations also require CSRF tokens and a matching Origin/Referer. Local HTTP works only with the explicit insecure development cookie opt-in. Application token authentication is identical in all environments.
 
@@ -89,7 +92,6 @@ Set `LOCKGATE_ORIGIN=https://lockgate.internal` and **remove** `LOCKGATE_INSECUR
 | `POSTGRE_DSN` | PostgreSQL keyword DSN, such as `host=... user=... password=... dbname=lockgate port=5432 sslmode=disable`. Takes precedence over `DATABASE_URL`. |
 | `DATABASE_URL` | Backward-compatible PostgreSQL URL when `POSTGRE_DSN` is unset. Use `sslmode=verify-full` with an appropriate CA for TLS verification. |
 | `LOCKGATE_PORT` / `LOCKGATE_BIND` | Compose host port/address; defaults to `18430` / `127.0.0.1`. |
-| `LOCKGATE_MASTER_KEY_FILE` | Base64 32-byte key; defaults to `/run/secrets/lockgate-master-key`. |
 | `LOCKGATE_ADDR` | HTTP bind address, default `127.0.0.1:8080`. |
 | `LOCKGATE_ORIGIN` | Exact external origin, default `https://localhost:8080`; no trailing slash or path. |
 | `LOCKGATE_INSECURE_DEV_COOKIES` | Set exactly `true` only for local HTTP development. Default false. |
@@ -168,13 +170,13 @@ Grants default to **until revoked**. Expiring grants are represented in storage 
 
 ## Encryption and versioning
 
-Every version gets a random 256-bit DEK. AES-256-GCM encrypts its JSON payload; a separate random GCM nonce wraps the DEK with the master key. Path, immutable version number, and key version are authenticated associated data, preventing ciphertext from being moved between versions or paths. The database stores ciphertext, nonce, nonce-prefixed wrapped DEK, algorithm, and key version. The master key is never stored in PostgreSQL. `secure.KeyProvider` is the small future extension point; the file provider supports `file-v1` only. Changing the master key file without rewrapping makes existing secrets unreadable; automatic key rotation is not part of this MVP.
+Every version gets a random 256-bit DEK. AES-256-GCM encrypts its JSON payload; a separate random GCM nonce wraps the DEK with the master key. Path, immutable version number, and key version are authenticated associated data, preventing ciphertext from being moved between versions or paths. PostgreSQL stores ciphertext, nonce, nonce-prefixed wrapped DEK, algorithm, key version, and the singleton master-key row. The key is loaded into process memory at startup. `secure.KeyProvider` remains the key-provider extension point; imported file-backed keys retain their `file-v1` version label. Key rotation is not part of this MVP.
 
 Database triggers reject modification/deletion of secret version rows. Concurrent updates allocate monotonically increasing versions under a secret row lock. Restoring an old version decrypts and re-encrypts into a new version. Archiving removes a secret path from machine access while retaining encrypted history; restoring or saving the path unarchives it. The UI shows version metadata and visually masks current values by default. The authenticated detail page contains those values in its HTML for editing and is audited as a secret read; masking is not a separate authorization boundary. All application and admin responses use `Cache-Control: no-store`.
 
 ## Backups and trust boundaries
 
-Back up PostgreSQL **and** the master key, separately. Losing the key means losing the secrets. Test restoring both. Database metadata (application names, paths, audit events) is not encrypted, but secret values are. Application tokens have 256 bits of entropy and only SHA-256 hashes are stored. Admin passwords use Argon2id (64 MiB, 3 iterations, parallelism 2). The application necessarily holds decrypted secrets in memory while serving authorized requests.
+The master key is stored in the same PostgreSQL database as the encrypted secret values. This avoids losing it when a local key file is deleted, but a database dump or database compromise now exposes both ciphertext and the key needed to decrypt it. Restrict database credentials and encrypt/protect database backups. A database restore must include the `lockgate_master_key` row. Database metadata (application names, paths, audit events) is not encrypted. Application tokens have 256 bits of entropy and only SHA-256 hashes are stored. Admin passwords use Argon2id (64 MiB, 3 iterations, parallelism 2). The application necessarily holds decrypted secrets in memory while serving authorized requests.
 
 Keep application tokens out of Git, Docker images, shell history, and logs. Passing them through environment variables is an intentional MVP tradeoff. Use TLS for remote token/secret transport. All admins have full administrative privileges. This is a small deployment tool, with no agents, enrollment, cloud identity, SSO, dynamic credentials, HA, or other Vault-style infrastructure. Audit events are transactionally recorded for state changes and successful reads; audit retention is currently manual, and the UI displays the newest 200 events.
 
